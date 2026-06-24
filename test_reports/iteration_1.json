@@ -1,0 +1,40 @@
+{
+  "summary": "First-pass testing of Radar Stock Screener (Expo + FastAPI + yfinance). Backend: 16/16 pytest tests PASSED covering health, markets overview (US/IN), 8 radar strategies, value_picks & momentum_breakouts scans, stock detail (AAPL + RELIANCE.NS), history, batch quotes, custom screener, and search. Frontend (mobile viewport 390x844): App loads cleanly on markets-screen with 4 indices and 10 gainer rows; US↔IN toggle confirmed (e.g., switching to IN populates rows like TRENT.NS); all 4 tabs reachable (Markets/Radar/Screener/Watchlist) with proper testIDs (radar-screen, screener-screen, watchlist-screen); Radar grid renders 8 strategy cards (radar-card-*) and tapping value_picks executes scan returning matches (21 stocks shown: T, PYPL, ACN…); Screener shows full universe of 99 US stocks with sort chips; Watchlist empty state shows 'Go to Screener' CTA; stock row tap navigates to /stock/IBM with full bundle (sparkline+OHLC chart, 7 period buttons 1D-5Y, 18 metric tiles, technicals, growth, watchlist toggle). No console errors during the run. The custom screener filter (pe<=25 & roe>=15 sorted by ROE desc) was strictly validated and ordering is correct. India market data uses .NS suffix and INR currency as required.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "(tabs)/_layout.tsx", "issue": "Expo router warns: 'Too many screens defined. Route screener is extraneous. Route watchlist is extraneous.' This appears in /var/log/supervisor/expo.out.log. Tab navigation still works but the redundant Tabs.Screen children may conflict with file-based routing in Expo Router 6. Reference: /app/frontend/app/(tabs)/_layout.tsx:53-67"},
+      {"component": "package versions", "issue": "Expo CLI doctor: expo@54.0.34 (expected ~54.0.35), expo-font@14.0.11 (expected ~14.0.12), expo-router@6.0.23 (expected ~6.0.24). Non-blocking but may cause subtle web/native incompatibilities."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_radar_screener.py",
+    "/app/backend/tests/conftest.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "(Optional) Investigate the Expo Router warning about extraneous 'screener'/'watchlist' routes in (tabs)/_layout.tsx — consider removing the redundant <Tabs.Screen> children or aligning them with file routes to silence the warning.",
+    "(Optional) Bump expo, expo-font, expo-router to the versions Expo CLI recommends to remove the version-mismatch warning at startup."
+  ],
+  "critical_code_review_comments": [
+    "stock_service.py is 499 lines (under 700) but mixes HTTP, parsing, indicators, strategies and screening — splitting into yh_client.py / indicators.py / radar.py would help maintenance.",
+    "Universe cache TTL is 180s while bundle cache is 120s — universe stocks may go briefly out-of-sync; not a functional bug.",
+    "/api/search short-circuits after 20 results across US/IN; combined with the early-break it can skip the IN universe entirely if 20 US matches found. Acceptable for now but document the behavior."
+  ],
+  "updated_files": [
+    "/app/backend/tests/conftest.py (new)",
+    "/app/backend/tests/test_radar_screener.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "None — no auth, no seed required. yfinance/curl_cffi pre-warm makes universe scans fast (<2s).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend public URL: EXPO_PUBLIC_BACKEND_URL from /app/frontend/.env. Universe is pre-warmed at startup so all /api/radar/* and /api/screener/* respond <2s. Frontend testIDs used: markets-screen, radar-screen, screener-screen, watchlist-screen, market-US, market-IN, radar-card-{strategy_key}, mover-gainers-{SYMBOL}, mover-losers-{SYMBOL}, stock-detail-screen, period-{label}, metric-{label}, toggle-watchlist, indices-row, index-card-{symbol}. Tab navigation via visible text labels Markets/Radar/Screener/Watchlist works in web preview. StockRow testID format = `${prefix}-${symbol}` (no extra '-row-' segment).",
+  "rca_of_issue": "N/A — no bugs found."
+}
