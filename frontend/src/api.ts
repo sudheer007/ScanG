@@ -104,4 +104,14 @@ export const api = {
     http<{ results: { symbol: string; name: string; market: Market; price: number; change_pct: number; currency: string }[] }>(
       `/search?q=${encodeURIComponent(q)}`,
     ),
+  // ---- Discover ----
+  discoverFeed: (market: Market) => http<any>(`/discover/feed?market=${market}`),
+  discoverAiPicks: (market: Market) => http<any>(`/discover/ai-picks?market=${market}`),
+  discoverEvents: (market: Market) => http<any>(`/discover/events?market=${market}`),
+  discoverAnalystRatings: (market: Market) => http<any>(`/discover/analyst-ratings?market=${market}`),
+  discoverPopularScreeners: (market: Market) => http<any>(`/discover/popular-screeners?market=${market}`),
+  discoverValuation: (market: Market) => http<any>(`/discover/valuation?market=${market}`),
+  discoverInvestorPicks: (market: Market) => http<any>(`/discover/investor-picks?market=${market}`),
+  discoverMostActive: (market: Market) => http<any>(`/discover/most-active?market=${market}`),
+  discoverWinnersLosers: (market: Market) => http<any>(`/discover/winners-losers?market=${market}`),
 };

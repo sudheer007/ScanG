@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime, timezone
 
 import stock_service as ss
+import discover_service as ds
 from stock_universe import get_universe, currency
 
 ROOT_DIR = Path(__file__).parent
@@ -205,6 +206,53 @@ async def search_stocks(q: str = Query(..., min_length=1)):
         if len(results) >= 20:
             break
     return {"query": q, "results": results[:20]}
+
+# ---------- Discover (combined widgets feed + per-widget details) ----------
+@api_router.get("/discover/feed")
+async def discover_feed(market: str = Query("US")):
+    return await ds.discover_feed(market)
+
+
+@api_router.get("/discover/ai-picks")
+async def discover_ai_picks(market: str = Query("US"), limit: int = Query(20, ge=1, le=50)):
+    return await ds.ai_picks(market, limit)
+
+
+@api_router.get("/discover/events")
+async def discover_events(market: str = Query("US"), limit: int = Query(40, ge=1, le=80)):
+    return await ds.market_events(market, limit)
+
+
+@api_router.get("/discover/analyst-ratings")
+async def discover_analyst_ratings(market: str = Query("US"), limit: int = Query(30, ge=1, le=80)):
+    return await ds.analyst_ratings(market, limit)
+
+
+@api_router.get("/discover/popular-screeners")
+async def discover_popular_screeners(market: str = Query("US")):
+    return await ds.popular_screeners(market)
+
+
+@api_router.get("/discover/valuation")
+async def discover_valuation(market: str = Query("US"), limit: int = Query(25, ge=1, le=80)):
+    return await ds.valuation(market, limit)
+
+
+@api_router.get("/discover/investor-picks")
+async def discover_investor_picks(market: str = Query("US"), limit: int = Query(12, ge=1, le=30)):
+    return await ds.investor_picks(market, limit)
+
+
+@api_router.get("/discover/most-active")
+async def discover_most_active(market: str = Query("US"), limit: int = Query(25, ge=1, le=80)):
+    return await ds.most_active(market, limit)
+
+
+@api_router.get("/discover/winners-losers")
+async def discover_winners_losers(market: str = Query("US"), limit: int = Query(25, ge=1, le=80)):
+    return await ds.winners_losers(market, limit)
+
+
 
 
 # ---------- Watchlist (server-side mirror, primary store is on-device) ----------

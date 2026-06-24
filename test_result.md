@@ -101,3 +101,89 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: |
+  Add a Discover tab at the bottom center that contains a scrollable feed of widgets:
+  AI stock recommendations, Market-moving events, Hot analyst ratings, Popular screeners,
+  Undervalued/Overvalued, Top investor picks, Most active, Daily winners & losers.
+  Each widget must open a detail screen with inner tabs and tables for depth.
+
+backend:
+  - task: "Discover widgets backend (discover_service.py + endpoints)"
+    implemented: true
+    working: true
+    file: "backend/discover_service.py, backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: true
+          agent: "main"
+          comment: |
+            Added discover_service.py with multi-factor AI scoring (momentum/value/quality/growth/technical),
+            synthesized analyst rating distribution & price targets, market event detection (breakouts,
+            sell-offs, RSI extremes, volume surges, golden cross), undervalued/overvalued (sector-relative
+            P/E), investor style portfolios (Buffett/Lynch/Graham/Growth/Dividend), most-active by volume
+            surge, winners/losers. Endpoints: /api/discover/feed (combined), /api/discover/ai-picks,
+            /events, /analyst-ratings, /popular-screeners, /valuation, /investor-picks, /most-active,
+            /winners-losers. Verified manually via curl — all return rich data.
+
+frontend:
+  - task: "Discover tab at bottom center + scrollable widget feed"
+    implemented: true
+    working: true
+    file: "frontend/app/(tabs)/_layout.tsx, frontend/app/(tabs)/discover.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: |
+            Inserted 'Discover' tab at center position (Markets / Radar / Discover / Screener / Watchlist)
+            with sparkles icon. Discover feed renders 8 widget preview cards: AI Picks, Events,
+            Analyst Ratings, Popular Screeners, Valuation (under/over), Investor Picks, Most Active,
+            Winners/Losers. Verified visually — feed shows live INCY 81.4 STRONG BUY, 52-week
+            breakouts, analyst rating bars, etc.
+
+  - task: "Discover detail screens with inner tabs + tables"
+    implemented: true
+    working: true
+    file: "frontend/app/discover/[id].tsx, frontend/src/components/widgets/*"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: |
+            Dynamic detail route /discover/[id] handles all 8 widgets. Includes:
+            - SegmentedTabs component for inner navigation (Buy/Hold/Sell, Upgrades/Downgrades, etc.)
+            - DataTable component (horizontally scrollable, alternating rows, column-tone coloring)
+            - RatingBar component (stacked analyst-distribution viz)
+            - ScoreBar component (factor breakdown)
+            - Spotlight card for top AI pick with score breakdown + reason chips
+            - Stat strip showing universe-wide aggregates
+            Verified visually: AI Picks detail shows spotlight (INCY) + factor bars + 20-row table
+            with SYMBOL/SCORE/RATING/PRICE/%/PE/ROE columns. Tabs switching works.
+
+metadata:
+  created_by: "main_agent"
+  version: "1.1"
+  test_sequence: 0
+  run_ui: false
+
+test_plan:
+  current_focus:
+    - "Discover widgets backend (discover_service.py + endpoints)"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+    - agent: "main"
+      message: |
+        Built Discover feature end-to-end. Backend has 9 new endpoints under /api/discover/*.
+        Frontend has new bottom-center tab with scrollable feed + dynamic detail screens with
+        inner tabs and tables. Reused existing cached universe so no new external API calls
+        required. AI scoring is transparent multi-factor heuristic (no LLM cost).

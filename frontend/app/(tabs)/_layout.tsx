@@ -51,6 +51,14 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="discover"
+        options={{
+          title: 'Discover',
+          tabBarIcon: ({ color }) => <TabIcon name="sparkles" color={color} />,
+          tabBarTestID: 'tab-discover',
+        }}
+      />
+      <Tabs.Screen
         name="screener"
         options={{
           title: 'Screener',
