@@ -95,6 +95,7 @@ export default function MarketsScreen() {
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.indicesRow}
+              style={styles.indicesScroll}
               testID="indices-row"
             >
               {indices.map((idx) => (
@@ -166,7 +167,8 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: theme.colors.border,
   },
   scroll: { flex: 1 },
-  indicesRow: { paddingHorizontal: theme.spacing.lg, gap: 10, paddingVertical: theme.spacing.sm },
+  indicesScroll: { flexGrow: 0, height: 116 },
+  indicesRow: { paddingHorizontal: theme.spacing.lg, gap: 10, paddingVertical: theme.spacing.sm, alignItems: 'center' },
   indexCard: {
     width: 150,
     backgroundColor: theme.colors.bg2,

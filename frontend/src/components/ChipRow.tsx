@@ -41,7 +41,7 @@ export default function ChipRow<T extends string>({ options, value, onChange, te
 }
 
 const styles = StyleSheet.create({
-  wrap: { height: 56 },
+  wrap: { height: 56, flexGrow: 0, flexShrink: 0 },
   row: {
     alignItems: 'center',
     gap: 8,
