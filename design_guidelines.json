@@ -1,0 +1,135 @@
+{
+  "app_name": "Radar",
+  "personality": "7 Dark-First Utility DARK",
+  "personality_one_liner": "A data-dense, hyper-glanceable finance command center where metrics are the heroes and clarity beats aesthetic.",
+  "color": {
+    "surface": "#0A0A0C",
+    "onSurface": "#FAFAFA",
+    "surfaceSecondary": "#141417",
+    "onSurfaceSecondary": "#A1A1AA",
+    "surfaceTertiary": "#202024",
+    "onSurfaceTertiary": "#D4D4D8",
+    "surfaceInverse": "#FAFAFA",
+    "onSurfaceInverse": "#0A0A0C",
+    "brand": "#FAFAFA",
+    "brandPrimary": "#FAFAFA",
+    "onBrandPrimary": "#0A0A0C",
+    "brandSecondary": "#A1A1AA",
+    "onBrandSecondary": "#FAFAFA",
+    "brandTertiary": "#27272A",
+    "onBrandTertiary": "#FAFAFA",
+    "success": "#10B981",
+    "onSuccess": "#022C22",
+    "warning": "#F59E0B",
+    "onWarning": "#451A03",
+    "error": "#EF4444",
+    "onError": "#450A0A",
+    "info": "#3F3F46",
+    "onInfo": "#FAFAFA",
+    "border": "#27272A",
+    "borderStrong": "#3F3F46",
+    "divider": "#1F1F22"
+  },
+  "typography": {
+    "displayFontFamily": "SpaceGrotesk",
+    "textFontFamily": "IBMPlexSans",
+    "scale": { "sm": 12, "base": 14, "lg": 16, "xl": 20, "2xl": 24 }
+  },
+  "spacing": { "rule": "Tight, data-dense spacing. Avoid accidental empty space; use md/lg padding structurally for clear horizontal scan lines.", "xs": 4, "sm": 8, "md": 12, "lg": 16, "xl": 24, "2xl": 32, "3xl": 48 },
+  "radius_tokens": { "sm": 6, "md": 12, "lg": 20, "pill": 999 },
+  "shadow_tier": 0,
+  "navigation": "bottom_tabs",
+  "icon_set": "Phosphor",
+  "glassmorphism": {
+    "enabled": true,
+    "do's": ["Bottom tab bar (heavy tint, med blur)", "Sticky headers over scrolling lists", "FAB background"],
+    "dont's": ["Cards in dense lists", "Form inputs", "Every single header"]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "screens": [
+    { 
+      "name": "Markets", 
+      "purpose": "Glanceable overview of US and Indian market indices and top movers.", 
+      "states": { 
+        "loading": "Skeleton rows mapping the horizontal index cards and vertical movers list.", 
+        "empty": "No data available state with a 'Refresh' button.", 
+        "error": "Failed to load market data, standard retry view." 
+      },
+      "layout": "Top section: Sticky header with an inline Segmented Control (US / India) toggle. Below: A horizontally scrollable row of 'Index Cards' (S&P 500, Nasdaq / Nifty 50, Sensex) displaying the value, change %, and a micro-sparkline. Below that: 'Top Gainers' and 'Top Losers' list. List items use a dense layout: Ticker (left), Sparkline (middle, using success/error color), Current Price + Change (right, right-aligned)."
+    },
+    { 
+      "name": "Radar", 
+      "purpose": "Surface pre-built sophisticated screening strategies as actionable 'scans'.", 
+      "states": { 
+        "loading": "Grid of skeleton cards.", 
+        "empty": "No scans available, show an abstract radar icon with 'System updating'.", 
+        "error": "Failed to load radar signals, retry button." 
+      },
+      "layout": "Header with 'Active Scans' title. Layout is a 2-column grid (`flexWrap: wrap`, `justifyContent: space-between`). Each card is a 'Strategy' (e.g., 'Momentum Breakouts', 'High ROCE'). Cards have a dark gradient or abstract background (image slot), an icon, a title, and a bottom badge (e.g., '24 Stocks')."
+    },
+    { 
+      "name": "Screener", 
+      "purpose": "Deep custom filtering to find specific stocks across multiple metrics.", 
+      "states": { 
+        "loading": "Skeleton filter chips and list rows.", 
+        "empty": "Illustration of an empty box/grid: 'No stocks match your filters. Try broadening your criteria.'", 
+        "error": "Screener timeout, retry." 
+      },
+      "layout": "Top sticky area: Horizontally scrollable row of `surfaceTertiary` pill chips representing active filters (e.g., 'P/E < 20', 'Market Cap > 5B'). Content: Vertical list of stocks. Each row displays the company, ticker, price, and highlighted badges showing the specific filtered metrics. A Floating Action Button (FAB) at the bottom right to 'Add Filter' which opens a full-screen Bottom Sheet with categorized sliders/inputs (Fundamentals, Technicals, Performance)."
+    },
+    {
+      "name": "Watchlist",
+      "purpose": "Locally persisted list of user-tracked stocks.",
+      "states": {
+        "loading": "Centered spinner.",
+        "empty": "Illustration of floating cubes, text 'Your watchlist is empty. Start adding stocks from the Screener.', CTA 'Go to Screener'.",
+        "error": "Error loading local storage."
+      },
+      "layout": "Simple dense list of saved stocks. Stock rows match the Home 'Market Movers' pattern (Ticker, Sparkline, Price/Change). Top right header action to Edit/Delete."
+    },
+    {
+      "name": "Stock Detail",
+      "purpose": "Comprehensive, data-dense view of a single stock's fundamentals and technicals.",
+      "states": {
+        "loading": "Skeleton chart and metrics grid.",
+        "empty": "Stock data unavailable.",
+        "error": "Error fetching ticker details."
+      },
+      "layout": "Glass sticky header with Ticker + Price (appears on scroll). Hero area: Large interactive price chart (candlestick or line). Below chart: Segmented control for timeframe (1D, 1W, 1M, 1Y). Next section: 'Key Metrics' presented in a dense 2x2 or 3x2 grid of small cards (P/E, Mkt Cap, Div Yield, ROE). Followed by 'Technicals' (RSI, MACD indicators in progress bars or badges)."
+    }
+  ],
+  "images": {
+    "radar_card_bg": {
+      "url": "https://images.unsplash.com/photo-1641355262431-021a396d4fe5?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzZ8MHwxfHNlYXJjaHwyfHxyYWRhciUyMHNjYW4lMjBkYXJrJTIwYWJzdHJhY3R8ZW58MHx8fHwxNzgyMjgxODMzfDA&ixlib=rb-4.1.0&q=85",
+      "alt": "Abstract wavy lines for Radar card background"
+    },
+    "stock_detail_hero_bg": {
+      "url": "https://images.unsplash.com/photo-1689732888407-310424e3a372?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NzB8MHwxfHNlYXJjaHwzfHxzdG9jayUyMG1hcmtldCUyMGNoYXJ0JTIwYWJzdHJhY3QlMjBkYXJrfGVufDB8fHx8MTc4MjI4MTgzM3ww&ixlib=rb-4.1.0&q=85",
+      "alt": "Dark candlestick chart background"
+    },
+    "empty_watchlist": {
+      "url": "https://images.unsplash.com/photo-1622737133809-d95047b9e673?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODF8MHwxfHNlYXJjaHwxfHxlbXB0eSUyMGJveCUyMGRhcmslMjBhYnN0cmFjdHxlbnwwfHx8fDE3ODIyODE4MzN8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "Floating cubes abstract illustration for empty state"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Strictly adhere to the '7 Dark-First Utility DARK' personality. Do NOT use blues or purples anywhere. Green and Red are functional status colors for gains and losses.",
+    "The app does not have trading functionalities. Do not add Buy/Sell buttons. Focus entirely on data visualization, filtering, and screening.",
+    "Rely heavily on SpaceGrotesk for numeric data and display elements, and IBMPlexSans for readable body text.",
+    "Implement dense, glanceable list items for stocks. Ticker on the left, an inline micro-chart (sparkline) in the middle, and right-aligned Price + Change %.",
+    "Use solid `surfaceSecondary` for most cards. Only use glassmorphism on the bottom tab bar and sticky headers to maintain performance and utility.",
+    "For the Radar pre-built screens, use a 2-column grid wrapped gracefully (`justifyContent: space-between`). The cards should use `radar_card_bg` as a subtle overlay with a dark scrim.",
+    "Ensure all text rendered on top of imagery uses a top-to-bottom dark gradient scrim to guarantee WCAG contrast compliance."
+  ]
+}
