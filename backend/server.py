@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 
 import stock_service as ss
 import discover_service as ds
+import analyzer_service as az
 from stock_universe import get_universe, currency
 
 ROOT_DIR = Path(__file__).parent
@@ -251,6 +252,38 @@ async def discover_most_active(market: str = Query("US"), limit: int = Query(25,
 @api_router.get("/discover/winners-losers")
 async def discover_winners_losers(market: str = Query("US"), limit: int = Query(25, ge=1, le=80)):
     return await ds.winners_losers(market, limit)
+
+
+# ---------- Analyzer / new widgets ----------
+@api_router.get("/discover/forecast")
+async def discover_forecast(market: str = Query("US"), limit: int = Query(25, ge=1, le=80)):
+    return await az.forecast_horizons(market, limit)
+
+
+@api_router.get("/discover/earnings-calendar")
+async def discover_earnings_calendar(market: str = Query("US"), limit: int = Query(50, ge=1, le=120), days_ahead: int = Query(45, ge=1, le=90)):
+    return await az.earnings_calendar(market, limit, days_ahead)
+
+
+@api_router.get("/discover/dividend-calendar")
+async def discover_dividend_calendar(market: str = Query("US"), limit: int = Query(50, ge=1, le=120), days_ahead: int = Query(60, ge=1, le=90)):
+    return await az.dividend_calendar(market, limit, days_ahead)
+
+
+@api_router.get("/discover/sector-rotation")
+async def discover_sector_rotation(market: str = Query("US")):
+    return await az.sector_rotation(market)
+
+
+@api_router.get("/discover/institutional-activity")
+async def discover_institutional_activity(market: str = Query("US"), limit: int = Query(25, ge=1, le=80)):
+    return await az.institutional_activity(market, limit)
+
+
+@api_router.get("/analyzer/{symbol}")
+async def deep_analyzer(symbol: str):
+    return await az.analyzer(symbol)
+
 
 
 

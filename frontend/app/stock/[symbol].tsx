@@ -100,9 +100,18 @@ export default function StockDetailScreen() {
         title={symbolShort}
         subtitle={stock.name}
         right={
-          <TouchableOpacity testID="toggle-watchlist" onPress={toggleWatch} style={styles.iconBtn}>
-            <Ionicons name={inList ? 'bookmark' : 'bookmark-outline'} size={20} color={inList ? theme.colors.success : theme.colors.text} />
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <TouchableOpacity
+              testID="open-analyzer"
+              onPress={() => router.push({ pathname: '/analyzer/[symbol]', params: { symbol: stock.symbol } })}
+              style={[styles.iconBtn, { backgroundColor: 'rgba(167,139,250,0.18)', borderColor: 'rgba(167,139,250,0.5)' }]}
+            >
+              <Ionicons name="sparkles" size={18} color="#A78BFA" />
+            </TouchableOpacity>
+            <TouchableOpacity testID="toggle-watchlist" onPress={toggleWatch} style={styles.iconBtn}>
+              <Ionicons name={inList ? 'bookmark' : 'bookmark-outline'} size={20} color={inList ? theme.colors.success : theme.colors.text} />
+            </TouchableOpacity>
+          </View>
         }
       />
 

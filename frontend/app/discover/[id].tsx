@@ -10,19 +10,24 @@ import { marketPref } from '@/src/storage-keys';
 import { LoadingState, ErrorState, EmptyState } from '@/src/components/States';
 import SegmentedTabs from '@/src/components/widgets/SegmentedTabs';
 import DataTable, { Column } from '@/src/components/widgets/DataTable';
+import SortableDataTable, { SortableColumn } from '@/src/components/widgets/SortableDataTable';
 import RatingBar from '@/src/components/widgets/RatingBar';
 import ScoreBar from '@/src/components/widgets/ScoreBar';
 import ChipRow from '@/src/components/ChipRow';
 
 const TITLES: Record<string, { title: string; subtitle: string; icon: any; accent: string }> = {
   'ai-picks':         { title: 'AI Stock Recommendations', subtitle: 'Multi-factor scoring across momentum, value, quality, growth & technicals', icon: 'sparkles', accent: '#A78BFA' },
-  'events':           { title: 'Market-Moving Events',     subtitle: 'Breakouts, sell-offs, surges, RSI extremes & golden crosses', icon: 'flash', accent: '#F59E0B' },
-  'analyst-ratings':  { title: 'Hot Analyst Ratings',      subtitle: 'Consensus ratings, upgrades, downgrades & price targets', icon: 'people', accent: '#60A5FA' },
+  'events':           { title: 'Market-Moving Events',     subtitle: 'Earnings, dividends, analyst changes, breakouts & technical signals', icon: 'flash', accent: '#F59E0B' },
+  'analyst-ratings':  { title: 'Hot Analyst Ratings',      subtitle: 'Real Wall Street consensus, upgrades, downgrades & price targets', icon: 'people', accent: '#60A5FA' },
   'popular-screeners':{ title: 'Popular Screeners',        subtitle: 'Strategies ranked by live match count', icon: 'filter', accent: '#34D399' },
   'valuation':        { title: 'Undervalued vs Overvalued',subtitle: 'Relative to sector average P/E with quality filter', icon: 'git-compare', accent: '#22D3EE' },
   'investor-picks':   { title: 'Top Investor Picks',       subtitle: 'Buffett · Lynch · Graham · Growth · Dividend portfolios', icon: 'trophy', accent: '#F472B6' },
   'most-active':      { title: 'Most Active',              subtitle: 'Highest volume vs 20-day average', icon: 'pulse', accent: '#FB7185' },
   'winners-losers':   { title: 'Daily Winners & Losers',   subtitle: 'Top gainers and biggest decliners', icon: 'podium', accent: '#84CC16' },
+  'forecast':         { title: 'Forecast Horizons',         subtitle: '1M / 3M / 6M / 1Y projected returns — real targets + AI model', icon: 'rocket', accent: '#22D3EE' },
+  'earnings-calendar':{ title: 'Earnings Calendar',         subtitle: 'Upcoming earnings reports with EPS estimates & last surprise', icon: 'podium', accent: '#F59E0B' },
+  'dividend-calendar':{ title: 'Dividend Calendar',         subtitle: 'Upcoming ex-dividend and payment dates by yield', icon: 'cash', accent: '#84CC16' },
+  'sector-rotation':  { title: 'Sector Rotation',           subtitle: 'Average daily change, breadth & winners/losers per sector', icon: 'pie-chart', accent: '#F97316' },
 };
 
 export default function DiscoverDetail() {
@@ -53,6 +58,10 @@ export default function DiscoverDetail() {
         case 'investor-picks':    res = await api.discoverInvestorPicks(m); setTab((t) => t || 'buffett'); break;
         case 'most-active':       res = await api.discoverMostActive(m); break;
         case 'winners-losers':    res = await api.discoverWinnersLosers(m); setTab((t) => t || 'gainers'); break;
+        case 'forecast':          res = await api.discoverForecast(m); setTab((t) => t || 'top'); break;
+        case 'earnings-calendar': res = await api.discoverEarningsCalendar(m); setTab((t) => t || 'all'); break;
+        case 'dividend-calendar': res = await api.discoverDividendCalendar(m); break;
+        case 'sector-rotation':   res = await api.discoverSectorRotation(m); break;
         default: res = null;
       }
       setData(res);
@@ -125,6 +134,10 @@ function DetailBody({ id, data, tab, setTab }: { id: string; data: any; tab: str
   if (id === 'investor-picks') return <InvestorBody data={data} tab={tab} setTab={setTab} />;
   if (id === 'most-active') return <MostActiveBody data={data} />;
   if (id === 'winners-losers') return <WinnersLosersBody data={data} tab={tab} setTab={setTab} />;
+  if (id === 'forecast') return <ForecastBody data={data} tab={tab} setTab={setTab} />;
+  if (id === 'earnings-calendar') return <EarningsCalBody data={data} tab={tab} setTab={setTab} />;
+  if (id === 'dividend-calendar') return <DividendCalBody data={data} />;
+  if (id === 'sector-rotation') return <SectorRotationBody data={data} />;
   return <EmptyState title="Unknown widget" subtitle={id} />;
 }
 
@@ -151,19 +164,34 @@ function AIPicksBody({ data, tab, setTab }: any) {
       />
       {/* Top pick spotlight */}
       {tab === 'buy' && list[0] ? <SpotlightAI stock={list[0]} /> : null}
-      <DataTable
+      <SortableDataTable
         linkToStockField="symbol"
+        stickyField="symbol"
+        defaultSort={{ key: 'ai_score', desc: true }}
         columns={[
-          { key: 'symbol', label: 'Symbol', width: 90, render: (r) => <SymCell symbol={r.symbol} name={r.name} /> },
           { key: 'ai_score', label: 'Score', width: 60, align: 'right', mono: true,
+            sortValue: (r) => r.ai_score,
             render: (r) => <Text style={{ color: r.ai_score >= 62 ? theme.colors.success : r.ai_score >= 48 ? theme.colors.warning : theme.colors.error, fontWeight: '800', textAlign: 'right' }}>{r.ai_score}</Text>,
           },
           { key: 'ai_rating', label: 'Rating', width: 90, render: (r) => <RatingPill r={r.ai_rating} /> },
-          { key: 'price', label: 'Price', width: 80, align: 'right', mono: true, render: (r) => <Text style={cellText('right')}>{fmtPrice(r.price, r.currency)}</Text> },
-          { key: 'change_pct', label: '%', width: 70, align: 'right', mono: true,
+          { key: 'price', label: 'Price', width: 80, align: 'right', mono: true, sortValue: (r) => r.price, render: (r) => <Text style={cellText('right')}>{fmtPrice(r.price, r.currency)}</Text> },
+          { key: 'change_pct', label: '%', width: 70, align: 'right', mono: true, sortValue: (r) => r.change_pct,
             render: (r) => <Text style={[cellText('right'), { color: changeColor(r.change_pct), fontWeight: '700' }]}>{fmtPct(r.change_pct)}</Text> },
-          { key: 'pe', label: 'P/E', width: 60, align: 'right', mono: true, render: (r) => <Text style={cellText('right')}>{r.pe ? r.pe.toFixed(1) : '—'}</Text> },
-          { key: 'roe', label: 'ROE', width: 60, align: 'right', mono: true, render: (r) => <Text style={cellText('right')}>{r.roe ? `${r.roe.toFixed(0)}%` : '—'}</Text> },
+          { key: 'target_mean_price', label: 'Target', width: 78, align: 'right', mono: true, sortValue: (r) => r.target_mean_price,
+            render: (r) => <Text style={cellText('right')}>{r.target_mean_price ? fmtPrice(r.target_mean_price, r.currency) : '—'}</Text> },
+          { key: 'pe', label: 'P/E', width: 56, align: 'right', mono: true, sortValue: (r) => r.pe, render: (r) => <Text style={cellText('right')}>{r.pe ? r.pe.toFixed(1) : '—'}</Text> },
+          { key: 'forward_pe', label: 'Fwd PE', width: 64, align: 'right', mono: true, sortValue: (r) => r.forward_pe, render: (r) => <Text style={cellText('right')}>{r.forward_pe ? r.forward_pe.toFixed(1) : '—'}</Text> },
+          { key: 'pb', label: 'P/B', width: 56, align: 'right', mono: true, sortValue: (r) => r.pb, render: (r) => <Text style={cellText('right')}>{r.pb ? r.pb.toFixed(2) : '—'}</Text> },
+          { key: 'roe', label: 'ROE', width: 60, align: 'right', mono: true, sortValue: (r) => r.roe,
+            render: (r) => <Text style={[cellText('right'), { color: (r.roe || 0) >= 15 ? theme.colors.success : theme.colors.text }]}>{r.roe ? `${r.roe.toFixed(0)}%` : '—'}</Text> },
+          { key: 'eps_growth', label: 'EPS↑', width: 64, align: 'right', mono: true, sortValue: (r) => r.eps_growth,
+            render: (r) => <Text style={[cellText('right'), { color: (r.eps_growth || 0) > 0 ? theme.colors.success : theme.colors.error }]}>{r.eps_growth != null ? `${r.eps_growth.toFixed(0)}%` : '—'}</Text> },
+          { key: 'revenue_growth', label: 'Rev↑', width: 64, align: 'right', mono: true, sortValue: (r) => r.revenue_growth,
+            render: (r) => <Text style={[cellText('right'), { color: (r.revenue_growth || 0) > 0 ? theme.colors.success : theme.colors.error }]}>{r.revenue_growth != null ? `${r.revenue_growth.toFixed(0)}%` : '—'}</Text> },
+          { key: 'dividend_yield', label: 'Div', width: 56, align: 'right', mono: true, sortValue: (r) => r.dividend_yield, render: (r) => <Text style={cellText('right')}>{r.dividend_yield ? `${r.dividend_yield.toFixed(1)}%` : '—'}</Text> },
+          { key: 'rsi', label: 'RSI', width: 50, align: 'right', mono: true, sortValue: (r) => r.rsi, render: (r) => <Text style={cellText('right')}>{r.rsi ? r.rsi.toFixed(0) : '—'}</Text> },
+          { key: 'market_cap', label: 'Mkt Cap', width: 86, align: 'right', mono: true, sortValue: (r) => r.market_cap, render: (r) => <Text style={cellText('right')}>{fmtMarketCap(r.market_cap, r.currency)}</Text> },
+          { key: 'sector', label: 'Sector', width: 130, sortValue: (r) => r.sector || '', render: (r) => <Text style={[cellText('left'), { color: theme.colors.textMuted, fontSize: 11 }]} numberOfLines={1}>{r.sector || '—'}</Text> },
         ]}
         rows={list}
         rowKey={(r) => r.symbol}
@@ -471,6 +499,166 @@ function WinnersLosersBody({ data, tab, setTab }: any) {
       />
     </View>
   );
+}
+
+// ----------------------------- 9. Forecast Horizons -----------------------------
+function ForecastBody({ data, tab, setTab }: any) {
+  const list = tab === 'bottom' ? (data.bottom || []) : (data.top || []);
+  return (
+    <View>
+      <SegmentedTabs
+        value={tab}
+        onChange={setTab}
+        options={[
+          { value: 'top', label: 'Top Picks', count: data.top?.length },
+          { value: 'bottom', label: 'Avoid', count: data.bottom?.length },
+        ]}
+      />
+      <View style={{ paddingHorizontal: 16, marginVertical: 8 }}>
+        <Text style={{ color: theme.colors.textSubtle, fontSize: 11, fontStyle: 'italic' }}>
+          1Y = real Wall Street consensus target · 1M/3M/6M = AI multi-signal model
+        </Text>
+      </View>
+      <SortableDataTable
+        linkToStockField="symbol"
+        stickyField="symbol"
+        defaultSort={{ key: 'forecast_score', desc: tab === 'top' }}
+        columns={[
+          { key: 'forecast_score', label: 'F-Score', width: 70, align: 'right', mono: true,
+            sortValue: (r) => r.forecast_score,
+            render: (r) => <Text style={[cellText('right'), { color: r.forecast_score >= 5 ? theme.colors.success : r.forecast_score >= 0 ? theme.colors.text : theme.colors.error, fontWeight: '800' }]}>{r.forecast_score?.toFixed(1)}</Text> },
+          { key: 'price', label: 'Price', width: 78, align: 'right', mono: true, sortValue: (r) => r.price, render: (r) => <Text style={cellText('right')}>{fmtPrice(r.price, r.currency)}</Text> },
+          ...(['1M', '3M', '6M', '1Y'] as const).map((h) => ({
+            key: `fc_${h}`,
+            label: h,
+            width: 70,
+            align: 'right' as const,
+            mono: true,
+            sortValue: (r: any) => r.forecasts?.[h]?.expected_return_pct,
+            render: (r: any) => {
+              const f = r.forecasts?.[h];
+              if (!f) return <Text style={cellText('right')}>—</Text>;
+              const pos = f.expected_return_pct >= 0;
+              return <Text style={[cellText('right'), { color: pos ? theme.colors.success : theme.colors.error, fontWeight: '800' }]}>{pos ? '+' : ''}{f.expected_return_pct.toFixed(1)}%</Text>;
+            },
+          })),
+          { key: 'target_1y', label: '1Y Target', width: 86, align: 'right', mono: true, sortValue: (r) => r.forecasts?.['1Y']?.target_price, render: (r) => <Text style={cellText('right')}>{r.forecasts?.['1Y']?.target_price != null ? fmtPrice(r.forecasts['1Y'].target_price, r.currency) : '—'}</Text> },
+          { key: 'ai_score', label: 'AI', width: 50, align: 'right', mono: true, sortValue: (r) => r.ai_score, render: (r) => <Text style={cellText('right')}>{r.ai_score?.toFixed(0)}</Text> },
+          { key: 'sector', label: 'Sector', width: 130, sortValue: (r) => r.sector || '', render: (r) => <Text style={[cellText('left'), { color: theme.colors.textMuted, fontSize: 11 }]} numberOfLines={1}>{r.sector || '—'}</Text> },
+        ]}
+        rows={list}
+        rowKey={(r) => r.symbol}
+      />
+    </View>
+  );
+}
+
+// ----------------------------- 10. Earnings Calendar -----------------------------
+function EarningsCalBody({ data, tab, setTab }: any) {
+  const byWeek = data.by_week || {};
+  const all = data.items || [];
+  const list = tab === 'all' ? all : (byWeek[tab] || []);
+  return (
+    <View>
+      <SegmentedTabs
+        value={tab}
+        onChange={setTab}
+        options={[
+          { value: 'all', label: 'All', count: all.length },
+          { value: 'this_week', label: 'This Week', count: byWeek.this_week?.length || 0 },
+          { value: 'next_week', label: 'Next Week', count: byWeek.next_week?.length || 0 },
+          { value: 'this_month', label: 'This Month', count: byWeek.this_month?.length || 0 },
+        ]}
+      />
+      <SortableDataTable
+        linkToStockField="symbol"
+        stickyField="symbol"
+        defaultSort={{ key: 'days_until', desc: false }}
+        columns={[
+          { key: 'days_until', label: 'In', width: 56, align: 'right', mono: true, sortValue: (r) => r.days_until,
+            render: (r) => <Text style={[cellText('right'), { color: r.days_until <= 3 ? theme.colors.warning : theme.colors.text, fontWeight: '700' }]}>{r.days_until <= 0 ? 'TDY' : `${r.days_until}d`}</Text> },
+          { key: 'earnings_date_epoch', label: 'Date', width: 76, align: 'right', mono: true, sortValue: (r) => r.earnings_date_epoch,
+            render: (r) => <Text style={cellText('right')}>{fmtShortDate(r.earnings_date_epoch)}</Text> },
+          { key: 'price', label: 'Price', width: 78, align: 'right', mono: true, sortValue: (r) => r.price, render: (r) => <Text style={cellText('right')}>{fmtPrice(r.price, r.currency)}</Text> },
+          { key: 'change_pct', label: '%', width: 64, align: 'right', mono: true, sortValue: (r) => r.change_pct,
+            render: (r) => <Text style={[cellText('right'), { color: changeColor(r.change_pct), fontWeight: '700' }]}>{fmtPct(r.change_pct)}</Text> },
+          { key: 'last_surprise_pct', label: 'Last Surp.', width: 80, align: 'right', mono: true, sortValue: (r) => r.last_surprise_pct,
+            render: (r) => r.last_surprise_pct != null ? <Text style={[cellText('right'), { color: r.last_surprise_pct > 0 ? theme.colors.success : theme.colors.error, fontWeight: '700' }]}>{r.last_surprise_pct > 0 ? '+' : ''}{r.last_surprise_pct.toFixed(1)}%</Text> : <Text style={cellText('right')}>—</Text> },
+          { key: 'eps_estimate_next_yr_pct', label: 'EPS Est↑', width: 78, align: 'right', mono: true, sortValue: (r) => r.eps_estimate_next_yr_pct,
+            render: (r) => <Text style={[cellText('right'), { color: (r.eps_estimate_next_yr_pct || 0) > 0 ? theme.colors.success : theme.colors.error }]}>{r.eps_estimate_next_yr_pct != null ? `${r.eps_estimate_next_yr_pct.toFixed(0)}%` : '—'}</Text> },
+          { key: 'ai_score', label: 'AI', width: 50, align: 'right', mono: true, sortValue: (r) => r.ai_score, render: (r) => <Text style={cellText('right')}>{r.ai_score?.toFixed(0)}</Text> },
+          { key: 'market_cap', label: 'Mkt Cap', width: 86, align: 'right', mono: true, sortValue: (r) => r.market_cap, render: (r) => <Text style={cellText('right')}>{fmtMarketCap(r.market_cap, r.currency)}</Text> },
+          { key: 'sector', label: 'Sector', width: 130, sortValue: (r) => r.sector || '', render: (r) => <Text style={[cellText('left'), { color: theme.colors.textMuted, fontSize: 11 }]} numberOfLines={1}>{r.sector || '—'}</Text> },
+        ]}
+        rows={list}
+        rowKey={(r) => r.symbol}
+      />
+    </View>
+  );
+}
+
+// ----------------------------- 11. Dividend Calendar -----------------------------
+function DividendCalBody({ data }: any) {
+  return (
+    <SortableDataTable
+      linkToStockField="symbol"
+      stickyField="symbol"
+      defaultSort={{ key: 'days_until', desc: false }}
+      columns={[
+        { key: 'days_until', label: 'In', width: 56, align: 'right', mono: true, sortValue: (r) => r.days_until,
+          render: (r) => <Text style={[cellText('right'), { color: r.days_until <= 3 ? theme.colors.warning : theme.colors.text, fontWeight: '700' }]}>{r.days_until <= 0 ? 'TDY' : `${r.days_until}d`}</Text> },
+        { key: 'ex_dividend_epoch', label: 'Ex-Div', width: 76, align: 'right', mono: true, sortValue: (r) => r.ex_dividend_epoch,
+          render: (r) => <Text style={cellText('right')}>{fmtShortDate(r.ex_dividend_epoch)}</Text> },
+        { key: 'payment_epoch', label: 'Pay Date', width: 80, align: 'right', mono: true, sortValue: (r) => r.payment_epoch,
+          render: (r) => <Text style={cellText('right')}>{fmtShortDate(r.payment_epoch)}</Text> },
+        { key: 'dividend_yield', label: 'Yield', width: 60, align: 'right', mono: true, sortValue: (r) => r.dividend_yield,
+          render: (r) => <Text style={[cellText('right'), { color: theme.colors.success, fontWeight: '700' }]}>{r.dividend_yield != null ? `${r.dividend_yield.toFixed(2)}%` : '—'}</Text> },
+        { key: 'price', label: 'Price', width: 80, align: 'right', mono: true, sortValue: (r) => r.price, render: (r) => <Text style={cellText('right')}>{fmtPrice(r.price, r.currency)}</Text> },
+        { key: 'sector', label: 'Sector', width: 140, sortValue: (r) => r.sector || '', render: (r) => <Text style={[cellText('left'), { color: theme.colors.textMuted, fontSize: 11 }]} numberOfLines={1}>{r.sector || '—'}</Text> },
+      ]}
+      rows={data.items || []}
+      rowKey={(r) => r.symbol}
+    />
+  );
+}
+
+// ----------------------------- 12. Sector Rotation -----------------------------
+function SectorRotationBody({ data }: any) {
+  return (
+    <SortableDataTable
+      stickyField="sector"
+      stickyWidth={140}
+      defaultSort={{ key: 'avg_change_pct', desc: true }}
+      renderSticky={(r) => (
+        <View>
+          <Text style={{ color: theme.colors.text, fontSize: 12, fontWeight: '800' }} numberOfLines={1}>{r.sector}</Text>
+          <Text style={{ color: theme.colors.textMuted, fontSize: 9, marginTop: 1 }}>{r.stock_count} stocks</Text>
+        </View>
+      )}
+      columns={[
+        { key: 'avg_change_pct', label: 'Avg %', width: 76, align: 'right', mono: true, sortValue: (r) => r.avg_change_pct,
+          render: (r) => <Text style={[cellText('right'), { color: changeColor(r.avg_change_pct), fontWeight: '800' }]}>{fmtPct(r.avg_change_pct)}</Text> },
+        { key: 'breadth_pct', label: 'Breadth', width: 76, align: 'right', mono: true, sortValue: (r) => r.breadth_pct,
+          render: (r) => <Text style={[cellText('right'), { color: (r.breadth_pct || 0) >= 50 ? theme.colors.success : theme.colors.error, fontWeight: '700' }]}>{r.breadth_pct?.toFixed(0)}%</Text> },
+        { key: 'winners', label: 'Up', width: 50, align: 'right', mono: true, sortValue: (r) => r.winners,
+          render: (r) => <Text style={[cellText('right'), { color: theme.colors.success }]}>{r.winners}</Text> },
+        { key: 'losers', label: 'Down', width: 50, align: 'right', mono: true, sortValue: (r) => r.losers,
+          render: (r) => <Text style={[cellText('right'), { color: theme.colors.error }]}>{r.losers}</Text> },
+        { key: 'stock_count', label: 'Count', width: 60, align: 'right', mono: true, sortValue: (r) => r.stock_count, render: (r) => <Text style={cellText('right')}>{r.stock_count}</Text> },
+        { key: 'market_cap_total', label: 'Mkt Cap', width: 86, align: 'right', mono: true, sortValue: (r) => r.market_cap_total, render: (r) => <Text style={cellText('right')}>{fmtMarketCap(r.market_cap_total, 'USD')}</Text> },
+      ]}
+      rows={data.sectors || []}
+      rowKey={(r) => r.sector}
+    />
+  );
+}
+
+function fmtShortDate(epoch: number | null | undefined): string {
+  if (!epoch) return '—';
+  try {
+    const d = new Date(epoch * 1000);
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  } catch { return '—'; }
 }
 
 // ----------------------------- Shared bits -----------------------------

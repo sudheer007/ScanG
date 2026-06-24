@@ -6,6 +6,7 @@ No external paid APIs needed.
 from __future__ import annotations
 
 import math
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from stock_service import get_market_universe, RADAR_STRATEGIES, _apply_strategy, get_movers
@@ -130,20 +131,30 @@ def _rating_from_score(score: float) -> str:
 
 
 def _rating_distribution(st: Dict[str, Any]) -> Dict[str, int]:
-    """Synthesize analyst rating distribution from the AI score breakdown.
-
-    Output sums to 100 to read as percentages.
-    """
+    """Use REAL distribution from Yahoo when available, fall back to synthesized."""
+    real = st.get("rating_distribution")
+    if real and isinstance(real, dict) and "strong_buy" in real:
+        return {
+            "strong_buy": real.get("strong_buy", 0),
+            "buy": real.get("buy", 0),
+            "hold": real.get("hold", 0),
+            "sell": real.get("sell", 0),
+            "counts": real.get("counts"),
+            "source": "yahoo",
+        }
     score, _ = _ai_score(st)
     if score >= 75:
-        return {"strong_buy": 55, "buy": 30, "hold": 12, "sell": 3}
-    if score >= 62:
-        return {"strong_buy": 35, "buy": 40, "hold": 18, "sell": 7}
-    if score >= 48:
-        return {"strong_buy": 15, "buy": 30, "hold": 40, "sell": 15}
-    if score >= 35:
-        return {"strong_buy": 5, "buy": 18, "hold": 42, "sell": 35}
-    return {"strong_buy": 2, "buy": 10, "hold": 28, "sell": 60}
+        d = {"strong_buy": 55, "buy": 30, "hold": 12, "sell": 3}
+    elif score >= 62:
+        d = {"strong_buy": 35, "buy": 40, "hold": 18, "sell": 7}
+    elif score >= 48:
+        d = {"strong_buy": 15, "buy": 30, "hold": 40, "sell": 15}
+    elif score >= 35:
+        d = {"strong_buy": 5, "buy": 18, "hold": 42, "sell": 35}
+    else:
+        d = {"strong_buy": 2, "buy": 10, "hold": 28, "sell": 60}
+    d["source"] = "model"
+    return d
 
 
 # -------------------------------------------------------------------
@@ -189,7 +200,9 @@ async def ai_picks(market: str, limit: int = 20) -> Dict[str, Any]:
 # 2. Market-Moving Events
 # -------------------------------------------------------------------
 def _detect_events(stocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    import time as _t
     events: List[Dict[str, Any]] = []
+    now_ts = int(_t.time())
     for st in stocks:
         chg = _safe(st.get("change_pct")) or 0
         vs = _safe(st.get("volume_surge")) or 0
@@ -197,90 +210,121 @@ def _detect_events(stocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         rsi = _safe(st.get("rsi"))
         price, ma50, ma200 = _safe(st.get("price")), _safe(st.get("ma50")), _safe(st.get("ma200"))
 
+        base = {
+            "symbol": st["symbol"], "name": st.get("name"),
+            "change_pct": chg, "currency": st.get("currency"),
+            "price": st.get("price"), "sector": st.get("sector"),
+        }
+
+        # ---- Earnings calendar event ----
+        ne = st.get("next_earnings_epoch")
+        if ne and 0 < (ne - now_ts) <= 14 * 86400:
+            days = int((ne - now_ts) / 86400)
+            events.append({**base,
+                "type": "earnings", "category": "Earnings",
+                "title": f"Earnings in {days}d" if days >= 1 else "Earnings Today",
+                "icon": "podium", "tone": "neutral",
+                "detail": f"Reports {datetime.fromtimestamp(ne, tz=timezone.utc).strftime('%b %d')}" + (f" · {st.get('analyst_count')} analysts" if st.get('analyst_count') else ""),
+                "ts": ne,
+            })
+
+        # ---- Ex-dividend event ----
+        ex = st.get("ex_dividend_epoch")
+        if ex and 0 < (ex - now_ts) <= 14 * 86400 and (st.get("dividend_yield") or 0) > 0:
+            days = int((ex - now_ts) / 86400)
+            events.append({**base,
+                "type": "dividend", "category": "Dividend",
+                "title": f"Ex-Dividend in {days}d" if days >= 1 else "Ex-Div Today",
+                "icon": "cash", "tone": "pos",
+                "detail": f"Yield {st.get('dividend_yield', 0):.2f}% · Ex {datetime.fromtimestamp(ex, tz=timezone.utc).strftime('%b %d')}",
+                "ts": ex,
+            })
+
+        # ---- Analyst upgrade/downgrade event ----
+        ud = st.get("latest_upgrade_downgrade")
+        if ud and ud.get("date_epoch"):
+            age = now_ts - ud["date_epoch"]
+            if 0 <= age <= 14 * 86400:  # within last 2 weeks
+                action = (ud.get("action") or "").lower()
+                tone = "pos" if action in ("up", "init") else ("neg" if action == "down" else "neutral")
+                events.append({**base,
+                    "type": "analyst", "category": "Analyst",
+                    "title": f"{ud.get('firm', 'Analyst')}: {ud.get('to_grade') or 'Rating'}",
+                    "icon": "ribbon" if tone == "pos" else "alert-circle" if tone == "neg" else "people",
+                    "tone": tone,
+                    "detail": f"{ud.get('from_grade') or 'New'} → {ud.get('to_grade') or '—'}",
+                    "ts": ud["date_epoch"],
+                })
+
+        # ---- Price events (existing logic) ----
         if from52 is not None and from52 >= -2 and chg > 0:
-            events.append({
-                "type": "breakout",
-                "title": "52-Week High Breakout",
-                "icon": "ribbon",
-                "tone": "pos",
-                "symbol": st["symbol"], "name": st.get("name"),
-                "change_pct": chg, "detail": f"Within {abs(from52):.1f}% of 52-week high",
-                "currency": st.get("currency"),
-                "price": st.get("price"),
+            events.append({**base,
+                "type": "breakout", "category": "Technical",
+                "title": "52-Week High Breakout", "icon": "ribbon", "tone": "pos",
+                "detail": f"Within {abs(from52):.1f}% of 52-week high",
+                "ts": now_ts,
             })
         elif chg <= -5:
-            events.append({
-                "type": "selloff",
-                "title": "Heavy Sell-off",
-                "icon": "trending-down",
-                "tone": "neg",
-                "symbol": st["symbol"], "name": st.get("name"),
-                "change_pct": chg, "detail": f"Down {chg:.1f}% today on high volume" if vs > 1.5 else f"Down {chg:.1f}% today",
-                "currency": st.get("currency"),
-                "price": st.get("price"),
+            events.append({**base,
+                "type": "selloff", "category": "Price",
+                "title": "Heavy Sell-off", "icon": "trending-down", "tone": "neg",
+                "detail": f"Down {chg:.1f}%" + (" on high volume" if vs > 1.5 else ""),
+                "ts": now_ts,
             })
         elif chg >= 5:
-            events.append({
-                "type": "surge",
-                "title": "Price Surge",
-                "icon": "flash",
-                "tone": "pos",
-                "symbol": st["symbol"], "name": st.get("name"),
-                "change_pct": chg, "detail": f"Up {chg:.1f}% today" + (" on volume surge" if vs > 1.8 else ""),
-                "currency": st.get("currency"),
-                "price": st.get("price"),
+            events.append({**base,
+                "type": "surge", "category": "Price",
+                "title": "Price Surge", "icon": "flash", "tone": "pos",
+                "detail": f"Up {chg:.1f}%" + (" on volume" if vs > 1.8 else ""),
+                "ts": now_ts,
             })
 
         if vs >= 2.5:
-            events.append({
-                "type": "volume",
-                "title": "Unusual Volume",
-                "icon": "pulse",
+            events.append({**base,
+                "type": "volume", "category": "Volume",
+                "title": "Unusual Volume", "icon": "pulse",
                 "tone": "pos" if chg >= 0 else "neg",
-                "symbol": st["symbol"], "name": st.get("name"),
-                "change_pct": chg, "detail": f"Volume {vs:.1f}× 20-day average",
-                "currency": st.get("currency"),
-                "price": st.get("price"),
+                "detail": f"Volume {vs:.1f}× 20-day average",
+                "ts": now_ts,
+            })
+
+        # ---- EPS surprise event ----
+        eps_surp = st.get("latest_eps_surprise_pct")
+        if eps_surp is not None and abs(eps_surp) >= 5:
+            events.append({**base,
+                "type": "eps_surprise", "category": "Earnings",
+                "title": f"EPS {'Beat' if eps_surp > 0 else 'Miss'} {abs(eps_surp):.0f}%",
+                "icon": "trophy" if eps_surp > 0 else "warning",
+                "tone": "pos" if eps_surp > 0 else "neg",
+                "detail": f"Latest report {'beat' if eps_surp > 0 else 'missed'} estimates by {abs(eps_surp):.1f}%",
+                "ts": now_ts,
             })
 
         if rsi is not None:
             if rsi >= 75:
-                events.append({
-                    "type": "overbought",
-                    "title": "Overbought (RSI)",
-                    "icon": "warning",
-                    "tone": "neg",
-                    "symbol": st["symbol"], "name": st.get("name"),
-                    "change_pct": chg, "detail": f"RSI at {rsi:.0f} — overheated",
-                    "currency": st.get("currency"),
-                    "price": st.get("price"),
+                events.append({**base,
+                    "type": "overbought", "category": "Technical",
+                    "title": "Overbought (RSI)", "icon": "warning", "tone": "neg",
+                    "detail": f"RSI at {rsi:.0f} — overheated", "ts": now_ts,
                 })
             elif rsi <= 25:
-                events.append({
-                    "type": "oversold",
-                    "title": "Oversold (RSI)",
-                    "icon": "snow",
-                    "tone": "pos",
-                    "symbol": st["symbol"], "name": st.get("name"),
-                    "change_pct": chg, "detail": f"RSI at {rsi:.0f} — possible bounce",
-                    "currency": st.get("currency"),
-                    "price": st.get("price"),
+                events.append({**base,
+                    "type": "oversold", "category": "Technical",
+                    "title": "Oversold (RSI)", "icon": "snow", "tone": "pos",
+                    "detail": f"RSI at {rsi:.0f} — possible bounce", "ts": now_ts,
                 })
 
         if price and ma50 and ma200 and ma50 > ma200 and (ma50 / ma200 - 1) < 0.01:
-            events.append({
-                "type": "golden_cross",
-                "title": "Golden Cross",
-                "icon": "git-merge",
-                "tone": "pos",
-                "symbol": st["symbol"], "name": st.get("name"),
-                "change_pct": chg, "detail": "50-DMA just crossed above 200-DMA",
-                "currency": st.get("currency"),
-                "price": st.get("price"),
+            events.append({**base,
+                "type": "golden_cross", "category": "Technical",
+                "title": "Golden Cross", "icon": "git-merge", "tone": "pos",
+                "detail": "50-DMA just crossed above 200-DMA", "ts": now_ts,
             })
-    # rank: surge & breakout & volume highest priority by |change|
-    priority = {"breakout": 1, "surge": 2, "volume": 3, "selloff": 4, "golden_cross": 5, "overbought": 6, "oversold": 7}
-    events.sort(key=lambda e: (priority.get(e["type"], 9), -abs(e.get("change_pct") or 0)))
+
+    priority = {"earnings": 1, "analyst": 2, "dividend": 3, "eps_surprise": 4,
+                "breakout": 5, "surge": 6, "selloff": 7, "volume": 8,
+                "golden_cross": 9, "overbought": 10, "oversold": 11}
+    events.sort(key=lambda e: (priority.get(e["type"], 99), -abs(e.get("change_pct") or 0)))
     return events
 
 
@@ -309,19 +353,44 @@ async def analyst_ratings(market: str, limit: int = 30) -> Dict[str, Any]:
     for st in universe:
         score, breakdown = _ai_score(st)
         dist = _rating_distribution(st)
-        consensus = _rating_from_score(score)
-        # "hotness" = strong_buy weight + recent change
-        hot = dist["strong_buy"] + (_safe(st.get("change_pct")) or 0) * 0.5
+        # Use REAL consensus if available, else map from score
+        real_key = (st.get("recommendation_key") or "").lower()
+        if real_key:
+            consensus_map = {
+                "strong_buy": "STRONG_BUY", "buy": "BUY", "hold": "HOLD",
+                "underperform": "REDUCE", "sell": "SELL", "strong_sell": "SELL",
+            }
+            consensus = consensus_map.get(real_key, _rating_from_score(score))
+        else:
+            consensus = _rating_from_score(score)
+        # Use REAL target if available
+        real_target = _safe(st.get("target_mean_price"))
+        if real_target and st.get("price") and st["price"] > 0:
+            price_target = real_target
+            target_upside = round((real_target / st["price"] - 1) * 100, 2)
+            target_source = "yahoo"
+        elif st.get("price"):
+            price_target = round(st["price"] * (1 + (score - 50) / 100 * 0.5), 2)
+            target_upside = round((price_target / st["price"] - 1) * 100, 2)
+            target_source = "model"
+        else:
+            price_target = None; target_upside = None; target_source = None
+        analyst_count_real = st.get("analyst_count")
+        analyst_count = int(analyst_count_real) if analyst_count_real else 8 + int(score / 8)
+        # "hotness" = strong_buy weight + recent change + analyst count
+        hot = dist["strong_buy"] + (_safe(st.get("change_pct")) or 0) * 0.5 + (analyst_count * 0.3 if analyst_count_real else 0)
         item = dict(st)
         item["consensus"] = consensus
         item["ratings"] = dist
         item["ai_score"] = score
-        item["analyst_count"] = 8 + int(score / 8)  # synthesized
+        item["analyst_count"] = analyst_count
         item["hotness"] = hot
-        # synth price target = current price * (1 + (score-50)/100 * 0.5)
-        if st.get("price"):
-            item["price_target"] = round(st["price"] * (1 + (score - 50) / 100 * 0.5), 2)
-            item["target_upside_pct"] = round((item["price_target"] / st["price"] - 1) * 100, 2)
+        item["price_target"] = price_target
+        item["target_upside_pct"] = target_upside
+        item["target_source"] = target_source
+        item["target_high"] = st.get("target_high_price")
+        item["target_low"] = st.get("target_low_price")
+        item["latest_change"] = st.get("latest_upgrade_downgrade")
         enriched.append(item)
     enriched.sort(key=lambda x: x["hotness"], reverse=True)
     upgrades = [x for x in enriched if x["consensus"] in ("STRONG_BUY", "BUY")][:limit]

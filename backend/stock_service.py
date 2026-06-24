@@ -105,7 +105,7 @@ def _yh_chart(symbol: str, rng: str = "1y", interval: str = "1d") -> Optional[Di
 def _yh_quote_summary(symbol: str) -> Dict[str, Any]:
     s = _get_session()
     crumb = _get_crumb()
-    modules = "summaryDetail,defaultKeyStatistics,financialData,quoteType,assetProfile,price"
+    modules = "summaryDetail,defaultKeyStatistics,financialData,quoteType,assetProfile,price,recommendationTrend,upgradeDowngradeHistory,calendarEvents,earnings,earningsHistory,earningsTrend,institutionOwnership,insiderHolders"
     url = f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{symbol}"
     try:
         r = s.get(url, params={"modules": modules, "crumb": crumb})
@@ -122,6 +122,7 @@ def _yh_quote_batch(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
     """Yahoo v7 quote batch (up to ~100 symbols per call). Returns dict by symbol."""
     if not symbols:
         return {}
+    global _crumb, _crumb_at
     s = _get_session()
     crumb = _get_crumb()
     out: Dict[str, Dict[str, Any]] = {}
@@ -129,16 +130,26 @@ def _yh_quote_batch(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
     for i in range(0, len(symbols), chunk):
         batch = symbols[i:i + chunk]
         url = "https://query1.finance.yahoo.com/v7/finance/quote"
-        try:
-            r = s.get(url, params={"symbols": ",".join(batch), "crumb": crumb})
-            if r.status_code != 200:
-                log.warning(f"quote batch {r.status_code}: {r.text[:120]}")
-                continue
-            results = r.json().get("quoteResponse", {}).get("result", [])
-            for q in results:
-                out[q.get("symbol")] = q
-        except Exception as e:
-            log.warning(f"quote batch err: {e}")
+        for attempt in range(2):
+            try:
+                r = s.get(url, params={"symbols": ",".join(batch), "crumb": crumb})
+                if r.status_code == 401 and attempt == 0:
+                    # Invalidate crumb and retry once
+                    with _session_lock:
+                        _crumb = None
+                        _crumb_at = 0
+                    crumb = _get_crumb()
+                    continue
+                if r.status_code != 200:
+                    log.warning(f"quote batch {r.status_code}: {r.text[:120]}")
+                    break
+                results = r.json().get("quoteResponse", {}).get("result", [])
+                for q in results:
+                    out[q.get("symbol")] = q
+                break
+            except Exception as e:
+                log.warning(f"quote batch err: {e}")
+                break
     return out
 
 
@@ -250,6 +261,13 @@ def _fetch_summary_layer(symbol: str) -> Dict[str, Any]:
     fd = summary.get("financialData", {}) or {}
     ap = summary.get("assetProfile", {}) or {}
     qt = summary.get("quoteType", {}) or {}
+    rt = summary.get("recommendationTrend", {}) or {}
+    udh = summary.get("upgradeDowngradeHistory", {}) or {}
+    ce = summary.get("calendarEvents", {}) or {}
+    eh = summary.get("earningsHistory", {}) or {}
+    et = summary.get("earningsTrend", {}) or {}
+    iho = summary.get("institutionOwnership", {}) or {}
+    ins_h = summary.get("insiderHolders", {}) or {}
 
     roe_raw = _safe(fd.get("returnOnEquity"))
     dy_raw = _safe(sd.get("dividendYield"))
@@ -257,10 +275,107 @@ def _fetch_summary_layer(symbol: str) -> Dict[str, Any]:
     rg_raw = _safe(fd.get("revenueGrowth"))
     pm_raw = _safe(fd.get("profitMargins"))
 
+    # ---- Real analyst ratings ----
+    rt_trend = rt.get("trend") or []
+    # latest period (0m = current)
+    latest_trend = None
+    for entry in rt_trend:
+        if entry.get("period") == "0m":
+            latest_trend = entry; break
+    if not latest_trend and rt_trend:
+        latest_trend = rt_trend[0]
+    rating_dist = None
+    total_analysts_rt = None
+    if latest_trend:
+        sb = int(latest_trend.get("strongBuy") or 0)
+        b = int(latest_trend.get("buy") or 0)
+        h = int(latest_trend.get("hold") or 0)
+        sl = int(latest_trend.get("sell") or 0)
+        ssl = int(latest_trend.get("strongSell") or 0)
+        total = sb + b + h + sl + ssl
+        if total > 0:
+            rating_dist = {
+                "strong_buy": round(sb * 100 / total),
+                "buy": round(b * 100 / total),
+                "hold": round(h * 100 / total),
+                "sell": round((sl + ssl) * 100 / total),
+                "counts": {"strong_buy": sb, "buy": b, "hold": h, "sell": sl, "strong_sell": ssl, "total": total},
+            }
+            total_analysts_rt = total
+
+    # ---- Latest upgrade/downgrade ----
+    udh_hist = udh.get("history") or []
+    latest_ud = None
+    if udh_hist:
+        # sort by epochGradeDate desc
+        try:
+            udh_sorted = sorted(udh_hist, key=lambda x: x.get("epochGradeDate") or 0, reverse=True)
+            top = udh_sorted[0]
+            latest_ud = {
+                "date_epoch": top.get("epochGradeDate"),
+                "firm": top.get("firm"),
+                "from_grade": top.get("fromGrade"),
+                "to_grade": top.get("toGrade"),
+                "action": top.get("action"),
+            }
+        except Exception:
+            pass
+
+    # ---- Calendar events: earnings + dividends ----
+    earnings_cal = ce.get("earnings") or {}
+    earnings_dates = earnings_cal.get("earningsDate") or []
+    next_earnings_epoch = None
+    if earnings_dates:
+        ed = earnings_dates[0]
+        if isinstance(ed, dict): next_earnings_epoch = ed.get("raw")
+        elif isinstance(ed, (int, float)): next_earnings_epoch = ed
+
+    ex_div = ce.get("exDividendDate")
+    if isinstance(ex_div, dict): ex_div_epoch = ex_div.get("raw")
+    else: ex_div_epoch = ex_div if isinstance(ex_div, (int, float)) else None
+
+    div_date = ce.get("dividendDate")
+    if isinstance(div_date, dict): div_date_epoch = div_date.get("raw")
+    else: div_date_epoch = div_date if isinstance(div_date, (int, float)) else None
+
+    # ---- Earnings history surprise % (latest) ----
+    eh_arr = eh.get("history") or []
+    latest_eps_surprise_pct = None
+    if eh_arr:
+        last = eh_arr[-1]
+        latest_eps_surprise_pct = _safe(last.get("surprisePercent"))
+
+    # ---- Earnings trend projections ----
+    et_trend = et.get("trend") or []
+    eps_growth_next_year = None
+    revenue_growth_next_year = None
+    for e in et_trend:
+        if e.get("period") == "+1y":
+            eps_growth_next_year = _safe((e.get("growth") or {}).get("raw"))
+            revenue_growth_next_year = _safe((e.get("revenueEstimate", {}) or {}).get("growth"))
+            break
+
+    # ---- Ownership ----
+    pct_institutions = _safe(ks.get("heldPercentInstitutions"))
+    pct_insiders = _safe(ks.get("heldPercentInsiders"))
+    top_institution = None
+    iho_arr = iho.get("ownershipList") or []
+    if iho_arr:
+        top = iho_arr[0]
+        top_institution = {
+            "organization": top.get("organization"),
+            "pct_held": _safe(top.get("pctHeld")),
+        }
+
     out = {
         "sector": ap.get("sector"),
         "industry": ap.get("industry"),
         "long_name": qt.get("longName"),
+        "description": ap.get("longBusinessSummary"),
+        "website": ap.get("website"),
+        "country": ap.get("country"),
+        "city": ap.get("city"),
+        "employees": _safe(ap.get("fullTimeEmployees")),
         "pb": _safe(ks.get("priceToBook")),
         "roe": (roe_raw * 100) if roe_raw is not None else None,
         "debt_to_equity": _safe(fd.get("debtToEquity")),
@@ -269,8 +384,43 @@ def _fetch_summary_layer(symbol: str) -> Dict[str, Any]:
         "eps_growth": (eg_raw * 100) if eg_raw is not None else None,
         "revenue_growth": (rg_raw * 100) if rg_raw is not None else None,
         "profit_margin": (pm_raw * 100) if pm_raw is not None else None,
+        "operating_margin": _safe(fd.get("operatingMargins")),
+        "gross_margin": _safe(fd.get("grossMargins")),
+        "current_ratio": _safe(fd.get("currentRatio")),
+        "quick_ratio": _safe(fd.get("quickRatio")),
+        "free_cashflow": _safe(fd.get("freeCashflow")),
+        "operating_cashflow": _safe(fd.get("operatingCashflow")),
+        "total_cash": _safe(fd.get("totalCash")),
+        "total_debt": _safe(fd.get("totalDebt")),
+        "total_revenue": _safe(fd.get("totalRevenue")),
+        "ebitda": _safe(fd.get("ebitda")),
+        "roa": _safe(fd.get("returnOnAssets")) * 100 if _safe(fd.get("returnOnAssets")) is not None else None,
         "beta": _safe(ks.get("beta")),
         "forward_pe": _safe(sd.get("forwardPE")),
+        "peg_ratio": _safe(ks.get("pegRatio")),
+        "ps_ratio": _safe(sd.get("priceToSalesTrailing12Months")),
+        # --- REAL analyst data ---
+        "target_mean_price": _safe(fd.get("targetMeanPrice")),
+        "target_high_price": _safe(fd.get("targetHighPrice")),
+        "target_low_price": _safe(fd.get("targetLowPrice")),
+        "target_median_price": _safe(fd.get("targetMedianPrice")),
+        "recommendation_mean": _safe(fd.get("recommendationMean")),
+        "recommendation_key": fd.get("recommendationKey"),
+        "analyst_count": int(_safe(fd.get("numberOfAnalystOpinions")) or total_analysts_rt or 0) or None,
+        "rating_distribution": rating_dist,
+        "latest_upgrade_downgrade": latest_ud,
+        # --- Calendar ---
+        "next_earnings_epoch": next_earnings_epoch,
+        "ex_dividend_epoch": ex_div_epoch,
+        "dividend_date_epoch": div_date_epoch,
+        # --- Earnings perf ---
+        "latest_eps_surprise_pct": latest_eps_surprise_pct,
+        "eps_growth_next_year_pct": (eps_growth_next_year * 100) if (eps_growth_next_year is not None and abs(eps_growth_next_year) < 10) else eps_growth_next_year,
+        "revenue_growth_next_year_pct": (revenue_growth_next_year * 100) if (revenue_growth_next_year is not None and abs(revenue_growth_next_year) < 10) else revenue_growth_next_year,
+        # --- Ownership ---
+        "pct_institutions": (pct_institutions * 100) if pct_institutions is not None else None,
+        "pct_insiders": (pct_insiders * 100) if pct_insiders is not None else None,
+        "top_institution": top_institution,
     }
     SUMMARY_CACHE[symbol] = out
     return out
@@ -296,13 +446,26 @@ def _merge_bundle(symbol: str, quote: Dict[str, Any], chart_layer: Dict[str, Any
         "pe": _safe(quote.get("trailingPE")),
         "forward_pe": _safe(quote.get("forwardPE")) or summary_layer.get("forward_pe"),
         "pb": _safe(quote.get("priceToBook")) or summary_layer.get("pb"),
+        "ps_ratio": summary_layer.get("ps_ratio"),
+        "peg_ratio": summary_layer.get("peg_ratio"),
         "roe": summary_layer.get("roe"),
+        "roa": summary_layer.get("roa"),
         "debt_to_equity": summary_layer.get("debt_to_equity"),
         "dividend_yield": _safe(quote.get("dividendYield")) or summary_layer.get("dividend_yield_summary"),
         "eps": _safe(quote.get("epsTrailingTwelveMonths")) or summary_layer.get("eps"),
         "eps_growth": summary_layer.get("eps_growth"),
         "revenue_growth": summary_layer.get("revenue_growth"),
         "profit_margin": summary_layer.get("profit_margin"),
+        "operating_margin": summary_layer.get("operating_margin"),
+        "gross_margin": summary_layer.get("gross_margin"),
+        "current_ratio": summary_layer.get("current_ratio"),
+        "quick_ratio": summary_layer.get("quick_ratio"),
+        "free_cashflow": summary_layer.get("free_cashflow"),
+        "operating_cashflow": summary_layer.get("operating_cashflow"),
+        "total_cash": summary_layer.get("total_cash"),
+        "total_debt": summary_layer.get("total_debt"),
+        "total_revenue": summary_layer.get("total_revenue"),
+        "ebitda": summary_layer.get("ebitda"),
         "beta": summary_layer.get("beta"),
         "sparkline": chart_layer.get("sparkline") or [],
         "rsi": chart_layer.get("rsi"),
@@ -314,6 +477,33 @@ def _merge_bundle(symbol: str, quote: Dict[str, Any], chart_layer: Dict[str, Any
         "high_52w": _safe(quote.get("fiftyTwoWeekHigh")) or chart_layer.get("high_52w"),
         "low_52w": _safe(quote.get("fiftyTwoWeekLow")) or chart_layer.get("low_52w"),
         "from_52w_high_pct": chart_layer.get("from_52w_high_pct"),
+        # --- Real analyst data ---
+        "target_mean_price": summary_layer.get("target_mean_price"),
+        "target_high_price": summary_layer.get("target_high_price"),
+        "target_low_price": summary_layer.get("target_low_price"),
+        "target_median_price": summary_layer.get("target_median_price"),
+        "recommendation_mean": summary_layer.get("recommendation_mean"),
+        "recommendation_key": summary_layer.get("recommendation_key"),
+        "analyst_count": summary_layer.get("analyst_count"),
+        "rating_distribution": summary_layer.get("rating_distribution"),
+        "latest_upgrade_downgrade": summary_layer.get("latest_upgrade_downgrade"),
+        # --- Calendar ---
+        "next_earnings_epoch": summary_layer.get("next_earnings_epoch"),
+        "ex_dividend_epoch": summary_layer.get("ex_dividend_epoch"),
+        "dividend_date_epoch": summary_layer.get("dividend_date_epoch"),
+        # --- Earnings perf ---
+        "latest_eps_surprise_pct": summary_layer.get("latest_eps_surprise_pct"),
+        "eps_growth_next_year_pct": summary_layer.get("eps_growth_next_year_pct"),
+        "revenue_growth_next_year_pct": summary_layer.get("revenue_growth_next_year_pct"),
+        # --- Ownership ---
+        "pct_institutions": summary_layer.get("pct_institutions"),
+        "pct_insiders": summary_layer.get("pct_insiders"),
+        "top_institution": summary_layer.get("top_institution"),
+        # --- Profile ---
+        "description": summary_layer.get("description"),
+        "website": summary_layer.get("website"),
+        "country": summary_layer.get("country"),
+        "employees": summary_layer.get("employees"),
     }
     return bundle
 

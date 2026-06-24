@@ -17,6 +17,7 @@ export default function DiscoverScreen() {
   const router = useRouter();
   const [market, setMarket] = useState<Market>('US');
   const [data, setData] = useState<any | null>(null);
+  const [extra, setExtra] = useState<any>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,6 +29,15 @@ export default function DiscoverScreen() {
       setError(null);
       const res = await api.discoverFeed(m);
       setData(res);
+      // Parallel-fetch the rich widgets (non-blocking for main feed)
+      Promise.all([
+        api.discoverForecast(m).catch(() => null),
+        api.discoverEarningsCalendar(m).catch(() => null),
+        api.discoverDividendCalendar(m).catch(() => null),
+        api.discoverSectorRotation(m).catch(() => null),
+      ]).then(([forecast, earnings, dividend, sector]) => {
+        setExtra({ forecast, earnings, dividend, sector });
+      });
     } catch (e: any) {
       setError(e?.message || 'Failed to load discover feed');
     } finally {
@@ -36,9 +46,9 @@ export default function DiscoverScreen() {
     }
   }, []);
 
-  useEffect(() => { setLoading(true); load(market); marketPref.set(market); }, [market, load]);
+  useEffect(() => { setLoading(true); setExtra({}); load(market); marketPref.set(market); }, [market, load]);
 
-  const onRefresh = useCallback(() => { setRefreshing(true); load(market); }, [market, load]);
+  const onRefresh = useCallback(() => { setRefreshing(true); setExtra({}); load(market); }, [market, load]);
 
   const w = data?.widgets || {};
 
@@ -98,6 +108,128 @@ export default function DiscoverScreen() {
                   rightTone={s.ai_score >= 62 ? 'pos' : s.ai_score >= 48 ? 'neutral' : 'neg'}
                 />
               ))}
+            </WidgetCard>
+
+            {/* Forecast Horizons (1M/3M/6M/1Y) */}
+            <WidgetCard
+              id="forecast"
+              title="Forecast Horizons — 1M / 3M / 6M / 1Y"
+              subtitle="Real analyst 1Y target + multi-signal projections"
+              icon="rocket"
+              accent="#22D3EE"
+              rightBadge={{ label: 'EARLY BETS', tone: 'pos' }}
+              testID="widget-forecast"
+            >
+              {(extra.forecast?.top || []).slice(0, 4).map((s: any) => (
+                <View key={s.symbol} style={styles.forecastRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.forecastSym}>{s.symbol.replace('.NS', '')}</Text>
+                    <Text style={styles.forecastName} numberOfLines={1}>{s.name}</Text>
+                  </View>
+                  <View style={styles.forecastChips}>
+                    {(['1M', '3M', '6M', '1Y'] as const).map((h) => {
+                      const r = s.forecasts?.[h]?.expected_return_pct;
+                      if (r == null) return <Text key={h} style={styles.fChipNa}>—</Text>;
+                      const pos = r >= 0;
+                      return (
+                        <View key={h} style={styles.fChip}>
+                          <Text style={styles.fChipH}>{h}</Text>
+                          <Text style={[styles.fChipV, { color: pos ? theme.colors.success : theme.colors.error }]}>{pos ? '+' : ''}{r.toFixed(0)}%</Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+                </View>
+              ))}
+              {!extra.forecast ? <Text style={styles.loadingTxt}>Crunching forecasts…</Text> : null}
+            </WidgetCard>
+
+            {/* Earnings Calendar */}
+            <WidgetCard
+              id="earnings-calendar"
+              title="Earnings Calendar"
+              subtitle="Upcoming earnings reports — next 45 days"
+              icon="podium"
+              accent="#F59E0B"
+              rightBadge={{ label: `${extra.earnings?.total || 0} upcoming`, tone: 'neutral' }}
+              testID="widget-earnings"
+            >
+              {(extra.earnings?.items || []).slice(0, 4).map((s: any) => (
+                <View key={s.symbol} style={styles.calRow}>
+                  <View style={styles.calDateBox}>
+                    <Text style={styles.calDay}>{fmtCalDay(s.earnings_date_epoch)}</Text>
+                    <Text style={styles.calMonth}>{fmtCalMonth(s.earnings_date_epoch)}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.calSym}>{s.symbol.replace('.NS', '')}</Text>
+                    <Text style={styles.calName} numberOfLines={1}>{s.name}</Text>
+                  </View>
+                  <View style={styles.calRight}>
+                    <Text style={styles.calDays}>{s.days_until <= 0 ? 'Today' : `in ${s.days_until}d`}</Text>
+                    {s.last_surprise_pct != null ? (
+                      <Text style={[styles.calSurprise, { color: s.last_surprise_pct > 0 ? theme.colors.success : theme.colors.error }]}>
+                        last: {s.last_surprise_pct > 0 ? '+' : ''}{s.last_surprise_pct.toFixed(1)}%
+                      </Text>
+                    ) : null}
+                  </View>
+                </View>
+              ))}
+              {!extra.earnings ? <Text style={styles.loadingTxt}>Loading earnings…</Text> : null}
+            </WidgetCard>
+
+            {/* Dividend Calendar */}
+            <WidgetCard
+              id="dividend-calendar"
+              title="Dividend Calendar"
+              subtitle="Upcoming ex-dividend & payment dates"
+              icon="cash"
+              accent="#84CC16"
+              rightBadge={{ label: `${extra.dividend?.total || 0} upcoming`, tone: 'pos' }}
+              testID="widget-dividends"
+            >
+              {(extra.dividend?.items || []).slice(0, 4).map((s: any) => (
+                <View key={s.symbol} style={styles.calRow}>
+                  <View style={[styles.calDateBox, { backgroundColor: 'rgba(132,204,22,0.15)' }]}>
+                    <Text style={[styles.calDay, { color: '#84CC16' }]}>{fmtCalDay(s.ex_dividend_epoch)}</Text>
+                    <Text style={styles.calMonth}>{fmtCalMonth(s.ex_dividend_epoch)}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.calSym}>{s.symbol.replace('.NS', '')}</Text>
+                    <Text style={styles.calName} numberOfLines={1}>{s.sector || s.name}</Text>
+                  </View>
+                  <View style={styles.calRight}>
+                    {s.dividend_yield != null ? (
+                      <Text style={[styles.calSurprise, { color: theme.colors.success }]}>{s.dividend_yield.toFixed(2)}% yield</Text>
+                    ) : null}
+                    <Text style={styles.calDays}>{s.days_until <= 0 ? 'Today' : `in ${s.days_until}d`}</Text>
+                  </View>
+                </View>
+              ))}
+              {!extra.dividend ? <Text style={styles.loadingTxt}>Loading dividends…</Text> : null}
+            </WidgetCard>
+
+            {/* Sector Rotation */}
+            <WidgetCard
+              id="sector-rotation"
+              title="Sector Rotation"
+              subtitle="Which sectors are leading today"
+              icon="pie-chart"
+              accent="#F97316"
+              testID="widget-sectors"
+            >
+              {(extra.sector?.sectors || []).slice(0, 5).map((s: any) => (
+                <View key={s.sector} style={styles.secRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.secName} numberOfLines={1}>{s.sector}</Text>
+                    <Text style={styles.secMeta}>{s.winners}↑ {s.losers}↓ · breadth {s.breadth_pct}%</Text>
+                  </View>
+                  <View style={styles.secChgBox}>
+                    <Text style={[styles.secChg, { color: changeColor(s.avg_change_pct) }]}>{fmtPct(s.avg_change_pct)}</Text>
+                    <Text style={styles.secCount}>{s.stock_count} stocks</Text>
+                  </View>
+                </View>
+              ))}
+              {!extra.sector ? <Text style={styles.loadingTxt}>Computing sector breadth…</Text> : null}
             </WidgetCard>
 
             {/* Market-Moving Events */}
@@ -338,4 +470,38 @@ const styles = StyleSheet.create({
   invTitle: { color: theme.colors.text, fontSize: 13, fontWeight: '700' },
   invSub: { color: theme.colors.textSubtle, fontSize: 11, marginTop: 1 },
   invCount: { color: theme.colors.text, fontSize: 14, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  // ---- New widget styles ----
+  loadingTxt: { color: theme.colors.textSubtle, fontSize: 11, paddingVertical: 12, textAlign: 'center', fontStyle: 'italic' },
+  forecastRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, gap: 8 },
+  forecastSym: { color: theme.colors.text, fontSize: 13, fontWeight: '800' },
+  forecastName: { color: theme.colors.textMuted, fontSize: 10, marginTop: 1 },
+  forecastChips: { flexDirection: 'row', gap: 4 },
+  fChip: { backgroundColor: theme.colors.bg3, paddingHorizontal: 5, paddingVertical: 3, borderRadius: 6, alignItems: 'center', minWidth: 36 },
+  fChipNa: { color: theme.colors.textSubtle, fontSize: 11, fontWeight: '600', width: 30, textAlign: 'center' },
+  fChipH: { color: theme.colors.textSubtle, fontSize: 8, fontWeight: '700' },
+  fChipV: { fontSize: 11, fontWeight: '800', marginTop: 1, fontVariant: ['tabular-nums'] },
+  calRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, gap: 10 },
+  calDateBox: { width: 40, height: 44, backgroundColor: 'rgba(245,158,11,0.15)', borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  calDay: { color: '#F59E0B', fontSize: 16, fontWeight: '800', lineHeight: 18 },
+  calMonth: { color: theme.colors.textMuted, fontSize: 9, fontWeight: '700', textTransform: 'uppercase' },
+  calSym: { color: theme.colors.text, fontSize: 13, fontWeight: '800' },
+  calName: { color: theme.colors.textMuted, fontSize: 10, marginTop: 1 },
+  calRight: { alignItems: 'flex-end' },
+  calDays: { color: theme.colors.text, fontSize: 11, fontWeight: '700' },
+  calSurprise: { fontSize: 10, fontWeight: '700', marginTop: 2, fontVariant: ['tabular-nums'] },
+  secRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, gap: 8 },
+  secName: { color: theme.colors.text, fontSize: 13, fontWeight: '700' },
+  secMeta: { color: theme.colors.textSubtle, fontSize: 10, marginTop: 1 },
+  secChgBox: { alignItems: 'flex-end' },
+  secChg: { fontSize: 13, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  secCount: { color: theme.colors.textSubtle, fontSize: 9, fontWeight: '600', marginTop: 1 },
 });
+
+function fmtCalDay(epoch: number): string {
+  if (!epoch) return '—';
+  try { return new Date(epoch * 1000).getDate().toString(); } catch { return '—'; }
+}
+function fmtCalMonth(epoch: number): string {
+  if (!epoch) return '';
+  try { return new Date(epoch * 1000).toLocaleString('en-US', { month: 'short' }); } catch { return ''; }
+}

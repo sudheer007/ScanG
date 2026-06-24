@@ -183,6 +183,40 @@ test_plan:
 agent_communication:
     - agent: "main"
       message: |
+        ## v1.2 — Major upgrade: real analyst data, sortable tables, deep analyzer
+        Backend:
+        - Extended Yahoo Finance quoteSummary modules to include recommendationTrend, upgradeDowngradeHistory,
+          calendarEvents, earningsHistory, earningsTrend, institutionOwnership, insiderHolders.
+        - _fetch_summary_layer now extracts: real target_mean/high/low/median, recommendation_mean,
+          analyst_count, rating_distribution (real percentages), latest_upgrade_downgrade,
+          next_earnings_epoch, ex_dividend_epoch, dividend_date_epoch, latest_eps_surprise_pct,
+          eps_growth_next_year_pct, pct_institutions, pct_insiders, top_institution, description, employees.
+        - analyzer_service.py: forecast_horizons (real 1Y consensus + AI 1M/3M/6M),
+          earnings_calendar, dividend_calendar, sector_rotation, institutional_activity,
+          analyzer(symbol) — comprehensive deep analysis with verdict/scores/forecasts/financials/risk/catalysts/trade idea.
+        - discover_service.analyst_ratings now prefers REAL targets/ratings from Yahoo.
+        - _detect_events expanded: earnings calendar, dividend, analyst upgrade/downgrade, EPS surprise.
+        - Crumb auto-refresh on 401 to harden Yahoo session.
+
+        Endpoints added:
+          /api/discover/forecast, /api/discover/earnings-calendar, /api/discover/dividend-calendar,
+          /api/discover/sector-rotation, /api/discover/institutional-activity, /api/analyzer/{symbol}
+
+        Frontend:
+        - SortableDataTable component (sortable headers + frozen sticky-left ticker column).
+        - AI Picks detail upgraded with 15 comprehensive columns and sortable headers.
+        - 4 new widget cards on Discover feed: Forecast Horizons, Earnings Calendar,
+          Dividend Calendar, Sector Rotation — each opens a full sortable detail.
+        - AI Analyzer screen at /analyzer/[symbol] — verdict hero, factor breakdown,
+          Wall Street consensus with real rating distribution + price target range,
+          forecast horizons cards, pros/cons, trade idea, full financials/technicals/risk/catalysts/ownership/about.
+        - "AI Analyzer" sparkles button added to top-right of every stock detail page.
+
+        All data verified live: AAPL → 42 analysts, $314.42 target, KGI Securities downgrade real.
+        PLTR forecast 62% upside (real analyst consensus).
+
+    - agent: "main"
+      message: |
         Built Discover feature end-to-end. Backend has 9 new endpoints under /api/discover/*.
         Frontend has new bottom-center tab with scrollable feed + dynamic detail screens with
         inner tabs and tables. Reused existing cached universe so no new external API calls

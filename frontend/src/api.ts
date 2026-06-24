@@ -114,4 +114,10 @@ export const api = {
   discoverInvestorPicks: (market: Market) => http<any>(`/discover/investor-picks?market=${market}`),
   discoverMostActive: (market: Market) => http<any>(`/discover/most-active?market=${market}`),
   discoverWinnersLosers: (market: Market) => http<any>(`/discover/winners-losers?market=${market}`),
+  discoverForecast: (market: Market) => http<any>(`/discover/forecast?market=${market}`),
+  discoverEarningsCalendar: (market: Market) => http<any>(`/discover/earnings-calendar?market=${market}`),
+  discoverDividendCalendar: (market: Market) => http<any>(`/discover/dividend-calendar?market=${market}`),
+  discoverSectorRotation: (market: Market) => http<any>(`/discover/sector-rotation?market=${market}`),
+  discoverInstitutional: (market: Market) => http<any>(`/discover/institutional-activity?market=${market}`),
+  analyzer: (symbol: string) => http<any>(`/analyzer/${encodeURIComponent(symbol)}`),
 };
