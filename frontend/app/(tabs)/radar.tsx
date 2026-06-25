@@ -1,15 +1,19 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 
-import { api, Market, RadarResult, Strategy } from '@/src/api';
+import { api, Market, RadarResult, Stock, Strategy } from '@/src/api';
 import { theme } from '@/src/theme';
 import { marketPref } from '@/src/storage-keys';
 import ChipRow from '@/src/components/ChipRow';
-import StockRow from '@/src/components/StockRow';
+import Sparkline from '@/src/components/Sparkline';
+import AnalystGauge from '@/src/components/AnalystGauge';
 import { EmptyState, ErrorState, LoadingState } from '@/src/components/States';
+import SortableDataTable, { SortableColumn } from '@/src/components/widgets/SortableDataTable';
+import { fmtMetric } from '@/src/screener/engine';
+import { METRIC_BY_KEY } from '@/src/screener/catalog';
 
 const ICON_MAP: Record<string, keyof typeof Ionicons.glyphMap> = {
   'trending-up': 'trending-up',
@@ -32,6 +36,21 @@ const ACCENT: Record<string, string> = {
   dividend_aristocrats: '#F59E0B',
   golden_cross: '#34D399',
 };
+
+// strategy -> extra metric column keys (from the screener catalog)
+const STRATEGY_METRICS: Record<string, string[]> = {
+  value_picks: ['pe', 'roe'],
+  momentum_breakouts: ['rsi', 'volume_surge'],
+  high_roce_low_debt: ['roe', 'debt_to_equity'],
+  oversold_quality: ['rsi', 'roe'],
+  multibaggers: ['eps_growth', 'revenue_growth'],
+  fifty_two_week_high: ['from_52w_high_pct', 'rsi'],
+  dividend_aristocrats: ['dividend_yield', 'roe'],
+  golden_cross: ['ma50', 'ma200'],
+};
+
+const upsidePct = (r: Stock) =>
+  r.target_mean_price && r.price ? ((r.target_mean_price - r.price) / r.price) * 100 : null;
 
 export default function RadarScreen() {
   const [market, setMarket] = useState<Market>('US');
@@ -66,11 +85,61 @@ export default function RadarScreen() {
     }
   }, []);
 
-  const onRefresh = () => {
-    if (active) { setRefreshing(true); runStrategy(active, market); }
-  };
-
+  const onRefresh = () => { if (active) { setRefreshing(true); runStrategy(active, market); } };
   const exitDetail = () => { setActive(null); setResult(null); };
+
+  const currency = result?.currency || (market === 'IN' ? 'INR' : 'USD');
+
+  const columns = useMemo<SortableColumn[]>(() => {
+    const metricCol = (key: string): SortableColumn => {
+      const m = METRIC_BY_KEY[key];
+      const label = (m?.label || key).replace(' (TTM)', '').replace(' Ratio', '').replace('Return on Equity (ROE)', 'ROE').replace(' (YoY)', ' Δ');
+      const fmt = m?.fmt || 'num';
+      const isPct = fmt === 'pct';
+      return {
+        key,
+        label,
+        width: fmt === 'pct' ? 76 : fmt === 'money' ? 74 : 64,
+        align: 'right',
+        mono: true,
+        sortValue: (r: any) => r[key] ?? null,
+        tone: isPct ? (r: any) => { const v = r[key]; return v == null ? undefined : v >= 0 ? 'pos' : 'neg'; } : undefined,
+        render: (r: any) => fmtMetric(key, r[key], currency),
+      };
+    };
+
+    const base: SortableColumn[] = [
+      {
+        key: 'price', label: 'Price', width: 74, align: 'right', mono: true,
+        sortValue: (r: any) => r.price ?? null,
+        render: (r: any) => fmtMetric('price', r.price, currency),
+      },
+      {
+        key: 'change_pct', label: 'Chg%', width: 62, align: 'right', mono: true,
+        sortValue: (r: any) => r.change_pct ?? null,
+        tone: (r: any) => (r.change_pct == null ? undefined : r.change_pct >= 0 ? 'pos' : 'neg'),
+        render: (r: any) => (r.change_pct == null ? '—' : `${r.change_pct >= 0 ? '+' : ''}${r.change_pct.toFixed(2)}%`),
+      },
+      {
+        key: 'trend', label: 'Trend (30d)', width: 96, align: 'center',
+        sortValue: () => null,
+        render: (r: any) => <Sparkline data={r.sparkline || []} width={82} height={30} fill strokeWidth={1.6} />,
+      },
+      {
+        key: 'rating', label: 'Analyst Rating', width: 132, align: 'right',
+        sortValue: (r: any) => (r.recommendation_mean != null ? 5 - r.recommendation_mean : null),
+        render: (r: any) => <AnalystGauge mean={r.recommendation_mean} count={r.analyst_count} />,
+      },
+      {
+        key: 'upside', label: 'Upside', width: 78, align: 'right', mono: true,
+        sortValue: (r: any) => upsidePct(r),
+        tone: (r: any) => { const u = upsidePct(r); return u == null ? undefined : u >= 0 ? 'pos' : 'neg'; },
+        render: (r: any) => { const u = upsidePct(r); return u == null ? '—' : `${u >= 0 ? '+' : ''}${u.toFixed(1)}%`; },
+      },
+    ];
+    const extras = (STRATEGY_METRICS[active || ''] || ['pe', 'roe']).map(metricCol);
+    return [...base, ...extras];
+  }, [active, currency]);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']} testID="radar-screen">
@@ -86,6 +155,11 @@ export default function RadarScreen() {
             {active && result ? `${result.count} matches • ${market}` : 'Smart scans to surface super stocks'}
           </Text>
         </View>
+        {active && (
+          <TouchableOpacity onPress={onRefresh} style={styles.iconBtn} testID="radar-refresh">
+            <Ionicons name="refresh" size={19} color={theme.colors.text} />
+          </TouchableOpacity>
+        )}
       </View>
 
       <ChipRow
@@ -102,17 +176,9 @@ export default function RadarScreen() {
         }}
       />
 
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={{ paddingBottom: 120 }}
-        refreshControl={
-          active ? (
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.text} />
-          ) : undefined
-        }
-      >
-        {!active ? (
-          loading ? (
+      {!active ? (
+        <ScrollView style={styles.scroll} contentContainerStyle={{ paddingBottom: 120 }}>
+          {loading ? (
             <LoadingState label="Loading strategies…" />
           ) : error ? (
             <ErrorState message={error} />
@@ -148,73 +214,36 @@ export default function RadarScreen() {
                 );
               })}
             </View>
-          )
-        ) : loading ? (
-          <LoadingState label={`Scanning ${market} universe…`} />
-        ) : error ? (
-          <ErrorState message={error} onRetry={() => runStrategy(active, market)} />
-        ) : !result || result.stocks.length === 0 ? (
-          <EmptyState title="No matches" subtitle="Try the other market or a different strategy." />
-        ) : (
-          <View>
-            <Text style={styles.strategyDescription}>{result.subtitle}</Text>
-            {result.stocks.map((s) => (
-              <StockRow
-                key={s.symbol}
-                stock={s}
-                testIDPrefix={`radar-${result.strategy}`}
-                rightBadges={radarBadges(result.strategy, s)}
-              />
-            ))}
-          </View>
-        )}
-      </ScrollView>
+          )}
+        </ScrollView>
+      ) : loading ? (
+        <LoadingState label={`Scanning ${market} universe…`} />
+      ) : error ? (
+        <ErrorState message={error} onRetry={() => runStrategy(active, market)} />
+      ) : !result || result.stocks.length === 0 ? (
+        <EmptyState title="No matches" subtitle="Try the other market or a different strategy." />
+      ) : (
+        <View style={{ flex: 1 }}>
+          <Text style={styles.strategyDescription}>{result.subtitle}</Text>
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={{ paddingHorizontal: theme.spacing.sm, paddingBottom: 120 }}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.text} />}
+          >
+            <SortableDataTable
+              testID="radar-table"
+              columns={columns}
+              rows={result.stocks}
+              linkToStockField="symbol"
+              stickyField="symbol"
+              stickyWidth={94}
+              defaultSort={{ key: 'rating', desc: true }}
+            />
+          </ScrollView>
+        </View>
+      )}
     </SafeAreaView>
   );
-}
-
-function radarBadges(strategy: string, s: any) {
-  switch (strategy) {
-    case 'value_picks':
-      return [
-        { label: 'P/E', value: s.pe?.toFixed(1) ?? '—' },
-        { label: 'ROE', value: (s.roe?.toFixed(0) ?? '—') + '%', tone: 'pos' as const },
-      ];
-    case 'momentum_breakouts':
-      return [
-        { label: 'RSI', value: s.rsi?.toFixed(0) ?? '—' },
-        { label: 'Vol×', value: s.volume_surge?.toFixed(1) + 'x', tone: 'pos' as const },
-      ];
-    case 'high_roce_low_debt':
-      return [
-        { label: 'ROE', value: (s.roe?.toFixed(0) ?? '—') + '%', tone: 'pos' as const },
-        { label: 'D/E', value: s.debt_to_equity?.toFixed(0) ?? '—' },
-      ];
-    case 'oversold_quality':
-      return [
-        { label: 'RSI', value: s.rsi?.toFixed(0) ?? '—', tone: 'neg' as const },
-        { label: 'ROE', value: (s.roe?.toFixed(0) ?? '—') + '%' },
-      ];
-    case 'multibaggers':
-      return [
-        { label: 'EPS Δ', value: (s.eps_growth?.toFixed(0) ?? '—') + '%', tone: 'pos' as const },
-        { label: 'Rev Δ', value: (s.revenue_growth?.toFixed(0) ?? '—') + '%', tone: 'pos' as const },
-      ];
-    case 'fifty_two_week_high':
-      return [{ label: 'From 52w', value: (s.from_52w_high_pct?.toFixed(1) ?? '—') + '%' }];
-    case 'dividend_aristocrats':
-      return [
-        { label: 'Yield', value: (s.dividend_yield?.toFixed(2) ?? '—') + '%', tone: 'pos' as const },
-        { label: 'ROE', value: (s.roe?.toFixed(0) ?? '—') + '%' },
-      ];
-    case 'golden_cross':
-      return [
-        { label: '50DMA', value: s.ma50?.toFixed(0) ?? '—' },
-        { label: '200DMA', value: s.ma200?.toFixed(0) ?? '—' },
-      ];
-    default:
-      return undefined;
-  }
 }
 
 const styles = StyleSheet.create({

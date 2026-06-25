@@ -82,6 +82,10 @@ export interface Stock {
   revenue_growth_next_year_pct?: number | null;
   pct_institutions?: number | null;
   pct_insiders?: number | null;
+  recommendation_mean?: number | null;
+  recommendation_key?: string | null;
+  analyst_count?: number | null;
+  target_mean_price?: number | null;
 }
 
 export interface IndexQuote {

@@ -1,0 +1,28 @@
+{
+  "summary": "Frontend-only retest of (1) SCREENER mode-toggle bug fix and (2) RADAR detail table with Sparkline + AnalystGauge + Upside column. Mobile viewport 390x844. Both features PASS end-to-end with ZERO 'Unexpected text node' console errors (the iteration-2 SortableDataTable bug is fully resolved — primitives are now auto-wrapped in <Text> at SortableDataTable.tsx:182-196).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "props.pointerEvents deprecation", "issue": "Boot-time warning 'props.pointerEvents is deprecated. Use style.pointerEvents' (2 occurrences). Pre-existing carry-over from iteration 2, low priority."}
+    ]
+  },
+  "test_report_links": ["/app/test_reports/iteration_3.json"],
+  "action_items": [
+    "LOW (carry-over) — Migrate any remaining `pointerEvents` JSX prop to `style.pointerEvents` to silence the deprecation warning. Source location is likely inside SortableDataTable.tsx:119 (`<ScrollView pointerEvents='box-none' ...>`). Move to `style={{ pointerEvents: 'box-none' }}`."
+  ],
+  "critical_code_review_comments": [
+    "SortableDataTable.tsx:119 still uses the deprecated `pointerEvents='box-none'` JSX prop. Move into style.",
+    "Radar columns define `sortValue: () => null` for the Trend column (radar.tsx:125). handleSort still toggles activeSort state when this header is tapped — UX-wise tapping Trend appears to do nothing (visually nothing changes). Consider gating header `onPress` if `sortValue` always returns null, or hide the caret/disable touch for non-sortable cols.",
+    "engine.ts inputMul hint-string detection (carry-over from iteration 2) — fragile, prefer explicit `inputScale` field."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "skipped (frontend-only request)", "frontend": "100% (7/7 screener steps + 10/10 radar steps)"},
+  "seed_data_creation": "None.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All testIDs verified live on https://scroll-sync-patch.preview.emergentagent.com — Screener: screener-screen, mode-quick, mode-custom, preset-{quality,value,...}, screener-table, edit-filters, clear-filters, filter-close, filter-apply. Radar: radar-screen, radar-grid, radar-card-{strategy_key}, radar-back, radar-refresh, radar-table, row-{symbol} (88 rows for high_roce_low_debt US). SortableDataTable now wraps primitives in <Text>; columns can return either string/number or JSX (e.g. <Sparkline/>, <AnalystGauge/>) — both paths work cleanly.",
+  "rca_of_issue": "Bug-fix verification: After preset-quality tap → screener-table renders; mode-quick tap → returns to preset grid (table gone, preset-quality card visible); mode-custom tap → screener-table renders again. Previously the second toggle was broken; now both segmented buttons switch views correctly. Radar feature verification: tapped radar-card-high_roce_low_debt → 88-row radar-table rendered with all 8 columns (SYM, PRICE, CHG%, TREND (30D), ANALYST RATING, UPSIDE, ROE, TOTAL DEBT TO EQUITY), 88 sparkline SVGs and 88 'Strong Buy/Buy/Hold/...' analyst-gauge labels visible. CHG% column color-toned (red/green) correctly. Sort header tap, refresh, back-to-grid all working. Zero 'Unexpected text node' / 'cannot be a child of <View>' errors in console (down from hundreds in iteration 2)."
+}

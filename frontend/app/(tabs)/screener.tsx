@@ -62,6 +62,7 @@ export default function ScreenerScreen() {
   const applyPreset = (p: Preset) => {
     setFilters(p.filters);
     setActivePreset(p.id);
+    setMode('custom');
   };
 
   const clearAll = () => { setFilters({}); setActivePreset(null); };
@@ -132,14 +133,14 @@ export default function ScreenerScreen() {
         <LoadingState label="Loading universe…" />
       ) : error ? (
         <ErrorState message={error} onRetry={load} />
-      ) : mode === 'quick' && !hasFilters ? (
+      ) : mode === 'quick' ? (
         <ScrollView
           contentContainerStyle={styles.grid}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.text} />}
         >
           <Text style={styles.gridHint}>Tap a screen to instantly load expert filters — then tweak any value.</Text>
           {PRESETS.map((p) => (
-            <TouchableOpacity key={p.id} testID={`preset-${p.id}`} style={styles.card} activeOpacity={0.85} onPress={() => applyPreset(p)}>
+            <TouchableOpacity key={p.id} testID={`preset-${p.id}`} style={[styles.card, activePreset === p.id && styles.cardActive]} activeOpacity={0.85} onPress={() => applyPreset(p)}>
               <View style={[styles.cardIcon, { backgroundColor: p.color + '22' }]}>
                 <Ionicons name={p.icon as any} size={20} color={p.color} />
               </View>
@@ -242,6 +243,7 @@ const styles = StyleSheet.create({
   grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', paddingHorizontal: theme.spacing.lg, paddingBottom: 120, gap: 0 },
   gridHint: { width: '100%', color: theme.colors.textMuted, fontSize: 12, marginBottom: 12, lineHeight: 17 },
   card: { width: '48.5%', backgroundColor: theme.colors.bg2, borderWidth: 1, borderColor: theme.colors.border, borderRadius: 16, padding: 14, marginBottom: 12 },
+  cardActive: { borderColor: theme.colors.success, backgroundColor: 'rgba(16,185,129,0.08)' },
   cardIcon: { width: 38, height: 38, borderRadius: 11, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
   cardTitle: { color: theme.colors.text, fontSize: 14, fontWeight: '700', lineHeight: 18 },
   cardBlurb: { color: theme.colors.textMuted, fontSize: 11, marginTop: 4, lineHeight: 15, minHeight: 30 },
