@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
+import React, { useMemo, useRef, useState } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, NativeSyntheticEvent, NativeScrollEvent } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { theme } from '@/src/theme';
@@ -23,25 +23,19 @@ interface Props {
   onRowPress?: (row: any) => void;
   linkToStockField?: string;
   defaultSort?: { key: string; desc?: boolean };
-  /** Width of the sticky symbol column (frozen on left). */
   stickyWidth?: number;
-  /** Field name in row for sticky symbol cell. */
   stickyField?: string;
-  /** Optional render for sticky cell. Default: shows symbol big and name small. */
   renderSticky?: (row: any) => React.ReactNode;
   testID?: string;
 }
 
+const ROW_HEIGHT = 56; // single source of truth — both sticky & data cells use this
+
 /**
- * SortableDataTable — horizontally scrollable table with:
- *   • Sortable column headers (tap once → desc, tap again → asc, tap a 3rd time → clear)
- *   • Sticky/frozen first column (ticker symbol) that stays visible while scrolling right
- *   • Alternating row colors
- *   • Per-column tone coloring
- *
- * Layout: a fixed-width sticky column on the left + a horizontally-scrollable
- * region for the rest of the columns. Both share vertical scroll via a single
- * vertical ScrollView wrapping the body.
+ * SortableDataTable v2 — fixes:
+ *  - Sticky column row heights now exactly match scrolling-region row heights (ROW_HEIGHT).
+ *  - Header horizontally scrolls in sync with the body.
+ *  - Single outer vertical ScrollView keeps both columns aligned during vertical scroll.
  */
 export default function SortableDataTable({
   columns,
@@ -50,7 +44,7 @@ export default function SortableDataTable({
   onRowPress,
   linkToStockField,
   defaultSort,
-  stickyWidth = 78,
+  stickyWidth = 82,
   stickyField = 'symbol',
   renderSticky,
   testID,
@@ -76,6 +70,19 @@ export default function SortableDataTable({
   }, [rows, sortKey, sortDesc, columns]);
 
   const totalScrollW = columns.reduce((acc, c) => acc + (c.width || 100), 0);
+  const headerScrollRef = useRef<ScrollView>(null);
+  const bodyScrollRef = useRef<ScrollView>(null);
+
+  // Sync header horizontal scroll with body
+  const onBodyHorizScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const x = e.nativeEvent.contentOffset.x;
+    headerScrollRef.current?.scrollTo({ x, animated: false });
+  };
+  // Reverse sync — when header is dragged
+  const onHeaderHorizScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const x = e.nativeEvent.contentOffset.x;
+    bodyScrollRef.current?.scrollTo({ x, animated: false });
+  };
 
   const handleSort = (key: string) => {
     if (sortKey !== key) { setSortKey(key); setSortDesc(true); return; }
@@ -91,7 +98,7 @@ export default function SortableDataTable({
   };
 
   const defaultStickyRender = (r: any) => (
-    <View>
+    <View style={styles.stickyContent}>
       <Text style={styles.stickySym} numberOfLines={1}>{String(r[stickyField] || '').replace('.NS', '')}</Text>
       {r.name ? <Text style={styles.stickyName} numberOfLines={1}>{r.name}</Text> : null}
     </View>
@@ -99,17 +106,21 @@ export default function SortableDataTable({
 
   return (
     <View style={styles.wrap} testID={testID}>
-      {/* Header */}
+      {/* ===== Header row (sticky col + horizontally scrollable header) ===== */}
       <View style={styles.headerRow}>
-        <View style={[styles.stickyHeader, { width: stickyWidth }]}>
+        <View style={[styles.stickyHeaderCell, { width: stickyWidth }]}>
           <TouchableOpacity onPress={() => handleSort(stickyField)} style={styles.headerCellTouch}>
             <Text style={styles.headerCellText}>SYM</Text>
             {sortKey === stickyField ? <Ionicons name={sortDesc ? 'caret-down' : 'caret-up'} size={9} color={theme.colors.text} /> : null}
           </TouchableOpacity>
         </View>
         <ScrollView
+          ref={headerScrollRef}
           horizontal
-          showsHorizontalScrollIndicator
+          showsHorizontalScrollIndicator={false}
+          scrollEventThrottle={16}
+          onScroll={onHeaderHorizScroll}
+          style={{ flex: 1 }}
           contentContainerStyle={{ width: Math.max(totalScrollW, 320) }}
         >
           <View style={{ flexDirection: 'row' }}>
@@ -130,11 +141,8 @@ export default function SortableDataTable({
         </ScrollView>
       </View>
 
-      {/* Body: vertical wrapper containing both sticky col + horizontal scroll of data */}
-      <ScrollView
-        style={{ maxHeight: 800 }}
-        nestedScrollEnabled
-      >
+      {/* ===== Body: vertical scroll wraps both sticky col + horizontal-scroll data ===== */}
+      <ScrollView style={{ maxHeight: 800 }} nestedScrollEnabled>
         <View style={{ flexDirection: 'row' }}>
           {/* Sticky column body */}
           <View style={[styles.stickyBodyCol, { width: stickyWidth }]}>
@@ -149,8 +157,15 @@ export default function SortableDataTable({
               </TouchableOpacity>
             ))}
           </View>
-          {/* Horizontally scrollable body */}
-          <ScrollView horizontal showsHorizontalScrollIndicator>
+          {/* Horizontally scrollable body — synced with header */}
+          <ScrollView
+            ref={bodyScrollRef}
+            horizontal
+            showsHorizontalScrollIndicator
+            scrollEventThrottle={16}
+            onScroll={onBodyHorizScroll}
+            style={{ flex: 1 }}
+          >
             <View style={{ width: Math.max(totalScrollW, 320) }}>
               {sortedRows.map((r, idx) => (
                 <TouchableOpacity
@@ -166,7 +181,7 @@ export default function SortableDataTable({
                       tone === 'neg' ? theme.colors.error :
                       theme.colors.text;
                     return (
-                      <View key={c.key} style={{ width: c.width || 100, paddingHorizontal: 6, paddingVertical: 10, justifyContent: 'center' }}>
+                      <View key={c.key} style={[styles.bodyCell, { width: c.width || 100 }]}>
                         {c.render ? c.render(r) : (
                           <Text
                             numberOfLines={1}
@@ -199,20 +214,21 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.bg2,
     borderBottomWidth: 1,
     borderBottomColor: theme.colors.border,
+    height: 32,
   },
-  stickyHeader: {
-    paddingVertical: 8,
-    paddingHorizontal: 8,
+  stickyHeaderCell: {
+    height: 32,
     backgroundColor: theme.colors.bg2,
     borderRightWidth: 1,
     borderRightColor: theme.colors.border,
+    justifyContent: 'center',
   },
   headerCellTouch: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
-    paddingHorizontal: 6,
-    paddingVertical: 8,
+    paddingHorizontal: 8,
+    height: 32,
   },
   headerCellText: {
     color: theme.colors.textSubtle,
@@ -227,17 +243,25 @@ const styles = StyleSheet.create({
     borderRightColor: theme.colors.border,
   },
   stickyCell: {
+    height: ROW_HEIGHT,
     paddingHorizontal: 8,
-    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.divider,
+    justifyContent: 'center',
+  },
+  stickyContent: { justifyContent: 'center' },
+  stickySym: { color: theme.colors.text, fontSize: 13, fontWeight: '800' },
+  stickyName: { color: theme.colors.textMuted, fontSize: 9, marginTop: 2 },
+  bodyRow: {
+    flexDirection: 'row',
+    height: ROW_HEIGHT,
     borderBottomWidth: 1,
     borderBottomColor: theme.colors.divider,
   },
-  stickySym: { color: theme.colors.text, fontSize: 13, fontWeight: '800' },
-  stickyName: { color: theme.colors.textMuted, fontSize: 9, marginTop: 1 },
-  bodyRow: {
-    flexDirection: 'row',
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.divider,
+  bodyCell: {
+    height: ROW_HEIGHT,
+    paddingHorizontal: 6,
+    justifyContent: 'center',
   },
   cell: { color: theme.colors.text, fontSize: 12, fontWeight: '500' },
 });

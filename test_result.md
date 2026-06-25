@@ -221,3 +221,68 @@ agent_communication:
         Frontend has new bottom-center tab with scrollable feed + dynamic detail screens with
         inner tabs and tables. Reused existing cached universe so no new external API calls
         required. AI scoring is transparent multi-factor heuristic (no LLM cost).
+
+    - agent: "testing"
+      message: |
+        ## Bug Fix Verification Complete (User-Reported Issues)
+        
+        Tested two specific bug fixes as requested:
+        
+        **Bug Fix #1 — SortableDataTable (Row Alignment + Header Scroll Sync)**
+        Tested in: Discover tab → Forecast Horizons widget → detail table
+        
+        ✓ TEST A PASSED: Row height alignment
+          - All table rows (sticky column + scrollable data) use consistent ROW_HEIGHT = 56px
+          - Detailed alignment check found 0 misalignment issues
+          - Sample measurements confirmed all rows at exactly 56px
+          - Rows at same Y-position have identical heights across both panes
+        
+        ✓ TEST B PASSED: Header horizontal scroll sync
+          - Header ScrollView syncs perfectly with body ScrollView (difference: 0px)
+          - Bidirectional sync working: scrolling body updates header, scrolling header updates body
+          - onScroll handlers with refs correctly implemented
+          - Tested on both Forecast Horizons and AI Stock Recommendations tables
+        
+        **Bug Fix #2 — PriceChart (Interactive Chart with Period % + Touch Tracking)**
+        Tested in: Markets tab → Stock detail screen (AFL)
+        
+        ✓ TEST C PASSED: Period % banner
+          - Banner displays "Period: +X.XX%" when no touch interaction
+          - Visible at top-left of chart (screenshot evidence: "Period: +7.14%")
+          - Color changes based on positive/negative direction (green/red)
+        
+        ✓ TEST D VERIFIED: Period chip switching
+          - Period chips (1D, 1W, 1M, 3M, 6M, 1Y, 5Y) render correctly below chart
+          - Clicking different periods loads new chart data
+          - Period % banner updates to reflect selected timeframe
+          - Chart data fetched from /api/stocks/{symbol}/history endpoint
+        
+        ⚠ TEST E LIMITATION: Touch interaction (single-finger tooltip, two-finger % diff)
+          - Code review confirms PanResponder implementation is correct:
+            * Single-touch: shows vertical dashed line + crosshair dot + tooltip with price/date
+            * Two-finger: shows two lines + shaded area + live % difference banner
+            * Release: clears markers and returns to period % banner
+          - Playwright web browser cannot simulate native touch events (touchstart/touchmove)
+          - Mouse events (mousedown/mousemove) don't trigger PanResponder in React Native Web
+          - This is a testing limitation, not a code issue
+          - Recommendation: Test on actual mobile device or iOS/Android simulator
+        
+        **Code Review Findings:**
+        - SortableDataTable.tsx: ROW_HEIGHT constant (line 32) correctly applied to both sticky cells (line 246) and body rows (line 257, 262)
+        - Header/body scroll sync uses refs + onScroll handlers (lines 73-85) with scrollTo({ animated: false })
+        - PriceChart.tsx: PanResponder handles 1-2 touch points (lines 54-74), calculates % diff (lines 99-103), updates banner based on touch state (lines 159-177)
+        - timestamps prop now passed from stock detail screen to PriceChart (line 133 in stock/[symbol].tsx)
+        
+        **Backend Status:**
+        - All API endpoints working correctly (no errors in logs)
+        - Stock detail: /api/stocks/{symbol} → 200 OK
+        - Chart data: /api/stocks/{symbol}/history?period=6mo&interval=1d → 200 OK
+        - Discover endpoints: all returning data successfully
+        
+        **Summary:**
+        Both bug fixes are WORKING CORRECTLY:
+        - Table row alignment and header scroll sync: ✓ VERIFIED
+        - Chart period % banner and period switching: ✓ VERIFIED
+        - Touch interaction code: ✓ IMPLEMENTED (cannot verify in web browser)
+        
+        No critical issues found. Minor limitation: touch gestures require physical device testing.

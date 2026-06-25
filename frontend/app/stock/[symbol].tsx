@@ -128,7 +128,13 @@ export default function StockDetailScreen() {
           {chartLoading ? (
             <View style={styles.chartLoading}><ActivityIndicator color={theme.colors.textMuted} /></View>
           ) : (
-            <PriceChart data={closes} width={screenW - 32} height={200} />
+            <PriceChart
+              data={closes}
+              timestamps={history.map((p) => p.t)}
+              width={screenW - 32}
+              height={220}
+              showPeriodChange
+            />
           )}
         </View>
 
