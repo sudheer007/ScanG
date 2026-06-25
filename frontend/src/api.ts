@@ -47,6 +47,41 @@ export interface Stock {
   high_52w?: number | null;
   low_52w?: number | null;
   from_52w_high_pct?: number | null;
+  // --- Extended screener metrics ---
+  open?: number | null;
+  day_high?: number | null;
+  day_low?: number | null;
+  prev_close?: number | null;
+  volume?: number | null;
+  avg_volume?: number | null;
+  rvol?: number | null;
+  shares_outstanding?: number | null;
+  float_shares?: number | null;
+  enterprise_value?: number | null;
+  ev_ebitda?: number | null;
+  ev_sales?: number | null;
+  book_value_per_share?: number | null;
+  payout_ratio?: number | null;
+  ps_ratio?: number | null;
+  peg_ratio?: number | null;
+  roa?: number | null;
+  gross_margin?: number | null;
+  operating_margin?: number | null;
+  current_ratio?: number | null;
+  quick_ratio?: number | null;
+  free_cashflow?: number | null;
+  operating_cashflow?: number | null;
+  total_cash?: number | null;
+  total_debt?: number | null;
+  p_fcf?: number | null;
+  from_52w_low_pct?: number | null;
+  atr?: number | null;
+  one_year_change_pct?: number | null;
+  ytd_pct?: number | null;
+  eps_growth_next_year_pct?: number | null;
+  revenue_growth_next_year_pct?: number | null;
+  pct_institutions?: number | null;
+  pct_insiders?: number | null;
 }
 
 export interface IndexQuote {
@@ -100,6 +135,8 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  screenerUniverse: (market: Market) =>
+    http<{ market: Market; currency: string; count: number; stocks: Stock[] }>(`/screener/universe?market=${market}`),
   search: (q: string) =>
     http<{ results: { symbol: string; name: string; market: Market; price: number; change_pct: number; currency: string }[] }>(
       `/search?q=${encodeURIComponent(q)}`,

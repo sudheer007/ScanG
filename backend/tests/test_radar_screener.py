@@ -172,6 +172,60 @@ class TestScreener:
         assert roes == sorted(roes, reverse=True)
 
 
+# ---------- Screener Universe (new fields for redesigned screener) ----------
+class TestScreenerUniverse:
+    NEW_FIELDS = [
+        "open", "day_high", "day_low", "prev_close",
+        "volume", "avg_volume", "rvol",
+        "enterprise_value", "ev_ebitda", "ev_sales",
+        "book_value_per_share", "payout_ratio", "atr",
+        "from_52w_low_pct", "one_year_change_pct", "ytd_pct",
+        "p_fcf", "shares_outstanding", "float_shares",
+    ]
+
+    def _check(self, body, mkt, expected_currency):
+        assert body["market"] == mkt
+        assert body["currency"] == expected_currency
+        stocks = body["stocks"]
+        assert isinstance(stocks, list) and len(stocks) > 0
+        # All new fields must be PRESENT (may be null) on every stock dict
+        missing_field_counts = {f: 0 for f in self.NEW_FIELDS}
+        for s in stocks:
+            for f in self.NEW_FIELDS:
+                if f not in s:
+                    missing_field_counts[f] += 1
+        absent = {k: v for k, v in missing_field_counts.items() if v > 0}
+        assert not absent, f"Stocks missing new fields: {absent}"
+        # At least some stocks should have non-null values for key new fields
+        non_null = {
+            f: sum(1 for s in stocks if s.get(f) is not None)
+            for f in ("open", "prev_close", "volume", "shares_outstanding", "one_year_change_pct")
+        }
+        for f, cnt in non_null.items():
+            assert cnt > 0, f"No stock has non-null {f}: {cnt}/{len(stocks)}"
+
+    def test_universe_us(self, api_client, base_url):
+        r = api_client.get(f"{base_url}/api/screener/universe", params={"market": "US"}, timeout=TIMEOUT)
+        assert r.status_code == 200, r.text
+        self._check(r.json(), "US", "USD")
+
+    def test_universe_in(self, api_client, base_url):
+        r = api_client.get(f"{base_url}/api/screener/universe", params={"market": "IN"}, timeout=TIMEOUT)
+        assert r.status_code == 200, r.text
+        b = r.json()
+        self._check(b, "IN", "INR")
+        # India tickers use .NS suffix
+        assert any(s["symbol"].endswith(".NS") for s in b["stocks"])
+
+    def test_universe_sizes(self, api_client, base_url):
+        """Sanity: universe should be sufficiently large for screening (~400+)."""
+        for mkt in ("US", "IN"):
+            r = api_client.get(f"{base_url}/api/screener/universe", params={"market": mkt}, timeout=TIMEOUT)
+            assert r.status_code == 200
+            cnt = r.json()["count"]
+            assert cnt >= 80, f"{mkt} universe too small: {cnt}"
+
+
 # ---------- Search ----------
 class TestSearch:
     def test_search_apple(self, api_client, base_url):
