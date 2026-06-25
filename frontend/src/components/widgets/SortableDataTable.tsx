@@ -116,8 +116,7 @@ export default function SortableDataTable({
           horizontal
           showsHorizontalScrollIndicator={false}
           scrollEnabled={false}
-          pointerEvents="box-none"
-          style={{ flex: 1 }}
+          style={{ flex: 1, pointerEvents: 'box-none' }}
           contentContainerStyle={{ width: Math.max(totalScrollW, 320) }}
         >
           <View style={{ flexDirection: 'row' }}>
