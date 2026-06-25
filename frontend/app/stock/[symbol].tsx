@@ -4,10 +4,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
-import { api, HistoryPoint, Stock } from '@/src/api';
+import { api, HistoryPoint, Stock, StockEvents, NewsItem } from '@/src/api';
 import { theme, fmtPrice, fmtPct, fmtMarketCap, changeColor, fmtNum } from '@/src/theme';
 import { watchlist } from '@/src/storage-keys';
 import PriceChart from '@/src/components/PriceChart';
+import EventsWidget from '@/src/components/EventsWidget';
+import NewsList from '@/src/components/NewsList';
 import { ErrorState, LoadingState } from '@/src/components/States';
 
 const PERIODS: { label: string; period: string; interval: string }[] = [
@@ -30,6 +32,8 @@ export default function StockDetailScreen() {
   const [chartLoading, setChartLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [inList, setInList] = useState(false);
+  const [events, setEvents] = useState<StockEvents | null>(null);
+  const [news, setNews] = useState<NewsItem[]>([]);
 
   const load = useCallback(async () => {
     if (!symbol) return;
@@ -59,6 +63,11 @@ export default function StockDetailScreen() {
 
   useEffect(() => { setLoading(true); load(); }, [load]);
   useEffect(() => { loadHistory(); }, [loadHistory]);
+  useEffect(() => {
+    if (!symbol) return;
+    api.stockEvents(symbol).then(setEvents).catch(() => {});
+    api.newsStock(symbol).then((r) => setNews(r.news || [])).catch(() => {});
+  }, [symbol]);
 
   const toggleWatch = async () => {
     if (!stock) return;
@@ -151,6 +160,10 @@ export default function StockDetailScreen() {
           ))}
         </ScrollView>
 
+        <Section title="Events & Calendar">
+          <EventsWidget events={events} currency={ccy} />
+        </Section>
+
         <Section title="Key Metrics">
           <MetricGrid items={[
             { label: 'Market Cap', value: fmtMarketCap(stock.market_cap, ccy) },
@@ -188,6 +201,11 @@ export default function StockDetailScreen() {
             { label: 'From 52w High', value: stock.from_52w_high_pct != null ? `${stock.from_52w_high_pct.toFixed(1)}%` : '—' },
           ]} />
         </Section>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Latest News</Text>
+        </View>
+        <NewsList news={news} emptyLabel="No recent headlines for this stock." />
       </ScrollView>
     </SafeAreaView>
   );
