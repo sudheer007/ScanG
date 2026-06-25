@@ -73,15 +73,12 @@ export default function SortableDataTable({
   const headerScrollRef = useRef<ScrollView>(null);
   const bodyScrollRef = useRef<ScrollView>(null);
 
-  // Sync header horizontal scroll with body
+  // One-directional sync: body drives header. Header is NOT user-draggable
+  // to avoid a programmatic-scroll feedback loop that caused stutter/vibration
+  // (especially when scrolling left against momentum).
   const onBodyHorizScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const x = e.nativeEvent.contentOffset.x;
     headerScrollRef.current?.scrollTo({ x, animated: false });
-  };
-  // Reverse sync — when header is dragged
-  const onHeaderHorizScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const x = e.nativeEvent.contentOffset.x;
-    bodyScrollRef.current?.scrollTo({ x, animated: false });
   };
 
   const handleSort = (key: string) => {
@@ -118,8 +115,8 @@ export default function SortableDataTable({
           ref={headerScrollRef}
           horizontal
           showsHorizontalScrollIndicator={false}
-          scrollEventThrottle={16}
-          onScroll={onHeaderHorizScroll}
+          scrollEnabled={false}
+          pointerEvents="box-none"
           style={{ flex: 1 }}
           contentContainerStyle={{ width: Math.max(totalScrollW, 320) }}
         >
