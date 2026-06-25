@@ -9,8 +9,8 @@ import { theme, fmtPct, fmtPrice, fmtMarketCap, changeColor } from '@/src/theme'
 import { marketPref } from '@/src/storage-keys';
 import { LoadingState, ErrorState, EmptyState } from '@/src/components/States';
 import SegmentedTabs from '@/src/components/widgets/SegmentedTabs';
-import DataTable, { Column } from '@/src/components/widgets/DataTable';
-import SortableDataTable, { SortableColumn } from '@/src/components/widgets/SortableDataTable';
+import DataTable, { Column } from '@/src/components/widgets/DataTable'; // eslint-disable-line @typescript-eslint/no-unused-vars
+import SortableDataTable, { SortableColumn } from '@/src/components/widgets/SortableDataTable'; // eslint-disable-line @typescript-eslint/no-unused-vars
 import RatingBar from '@/src/components/widgets/RatingBar';
 import ScoreBar from '@/src/components/widgets/ScoreBar';
 import ChipRow from '@/src/components/ChipRow';
@@ -381,22 +381,33 @@ function ValuationBody({ data, tab, setTab }: any) {
           { value: 'overvalued', label: 'Overvalued', count: data.overvalued?.length },
         ]}
       />
-      <DataTable
+      <SortableDataTable
         linkToStockField="symbol"
+        stickyField="symbol"
+        defaultSort={{ key: 'valuation_score', desc: true }}
         columns={[
-          { key: 'symbol', label: 'Symbol', width: 100, render: (r) => <SymCell symbol={r.symbol} name={r.name} /> },
-          { key: 'pe', label: 'P/E', width: 60, align: 'right', mono: true, render: (r) => <Text style={cellText('right')}>{r.pe?.toFixed(1) || '—'}</Text> },
-          { key: 'sector_avg_pe', label: 'Sec.PE', width: 70, align: 'right', mono: true, render: (r) => <Text style={cellText('right')}>{r.sector_avg_pe || '—'}</Text> },
-          { key: 'relative_pe', label: 'Rel.PE', width: 70, align: 'right', mono: true,
+          { key: 'pe', label: 'P/E', width: 64, align: 'right', mono: true, sortValue: (r) => r.pe,
+            render: (r) => <Text style={cellText('right')}>{r.pe?.toFixed(1) || '—'}</Text> },
+          { key: 'sector_avg_pe', label: 'Sec.PE', width: 72, align: 'right', mono: true, sortValue: (r) => r.sector_avg_pe,
+            render: (r) => <Text style={cellText('right')}>{r.sector_avg_pe || '—'}</Text> },
+          { key: 'relative_pe', label: 'Rel.PE', width: 74, align: 'right', mono: true, sortValue: (r) => r.relative_pe,
             render: (r) => {
               if (r.relative_pe == null) return <Text style={cellText('right')}>—</Text>;
               const tone = r.relative_pe < 1 ? 'pos' : 'neg';
               return <Text style={[cellText('right'), { color: tone === 'pos' ? theme.colors.success : theme.colors.error, fontWeight: '700' }]}>{r.relative_pe.toFixed(2)}×</Text>;
             } },
-          { key: 'pb', label: 'P/B', width: 60, align: 'right', mono: true, render: (r) => <Text style={cellText('right')}>{r.pb?.toFixed(2) || '—'}</Text> },
-          { key: 'roe', label: 'ROE', width: 60, align: 'right', mono: true, render: (r) => <Text style={cellText('right')}>{r.roe ? `${r.roe.toFixed(0)}%` : '—'}</Text> },
-          { key: 'valuation_score', label: 'Score', width: 60, align: 'right', mono: true,
+          { key: 'pb', label: 'P/B', width: 62, align: 'right', mono: true, sortValue: (r) => r.pb,
+            render: (r) => <Text style={cellText('right')}>{r.pb?.toFixed(2) || '—'}</Text> },
+          { key: 'roe', label: 'ROE', width: 62, align: 'right', mono: true, sortValue: (r) => r.roe,
+            render: (r) => <Text style={cellText('right')}>{r.roe ? `${r.roe.toFixed(0)}%` : '—'}</Text> },
+          { key: 'price', label: 'Price', width: 78, align: 'right', mono: true, sortValue: (r) => r.price,
+            render: (r) => <Text style={cellText('right')}>{fmtPrice(r.price, r.currency)}</Text> },
+          { key: 'change_pct', label: '%', width: 64, align: 'right', mono: true, sortValue: (r) => r.change_pct,
+            render: (r) => <Text style={[cellText('right'), { color: changeColor(r.change_pct), fontWeight: '700' }]}>{fmtPct(r.change_pct)}</Text> },
+          { key: 'valuation_score', label: 'Score', width: 64, align: 'right', mono: true, sortValue: (r) => r.valuation_score,
             render: (r) => <Text style={[cellText('right'), { fontWeight: '800', color: tab === 'undervalued' ? theme.colors.success : theme.colors.error }]}>{r.valuation_score}</Text> },
+          { key: 'sector', label: 'Sector', width: 130, sortValue: (r) => r.sector || '',
+            render: (r) => <Text style={[cellText('left'), { color: theme.colors.textMuted, fontSize: 11 }]} numberOfLines={1}>{r.sector || '—'}</Text> },
         ]}
         rows={list}
         rowKey={(r) => r.symbol}
@@ -427,17 +438,27 @@ function InvestorBody({ data, tab, setTab }: any) {
           <Text style={styles.styleCriteria}>Criteria: {active.criteria}</Text>
         </View>
       </View>
-      <DataTable
+      <SortableDataTable
         linkToStockField="symbol"
+        stickyField="symbol"
+        defaultSort={{ key: 'style_score', desc: true }}
         columns={[
-          { key: 'symbol', label: 'Symbol', width: 100, render: (r) => <SymCell symbol={r.symbol} name={r.name} /> },
-          { key: 'style_score', label: 'Fit', width: 60, align: 'right', mono: true, render: (r) => <Text style={[cellText('right'), { color: '#F472B6', fontWeight: '800' }]}>{r.style_score}</Text> },
-          { key: 'price', label: 'Price', width: 80, align: 'right', mono: true, render: (r) => <Text style={cellText('right')}>{fmtPrice(r.price, r.currency)}</Text> },
-          { key: 'change_pct', label: '%', width: 70, align: 'right', mono: true, render: (r) => <Text style={[cellText('right'), { color: changeColor(r.change_pct), fontWeight: '700' }]}>{fmtPct(r.change_pct)}</Text> },
-          { key: 'pe', label: 'P/E', width: 60, align: 'right', mono: true, render: (r) => <Text style={cellText('right')}>{r.pe?.toFixed(1) || '—'}</Text> },
-          { key: 'roe', label: 'ROE', width: 60, align: 'right', mono: true, render: (r) => <Text style={cellText('right')}>{r.roe ? `${r.roe.toFixed(0)}%` : '—'}</Text> },
-          { key: 'eps_growth', label: 'EPS↑', width: 70, align: 'right', mono: true, render: (r) => <Text style={cellText('right')}>{r.eps_growth ? `${r.eps_growth.toFixed(0)}%` : '—'}</Text> },
-          { key: 'market_cap', label: 'Mkt Cap', width: 90, align: 'right', mono: true, render: (r) => <Text style={cellText('right')}>{fmtMarketCap(r.market_cap, r.currency)}</Text> },
+          { key: 'style_score', label: 'Fit', width: 60, align: 'right', mono: true, sortValue: (r) => r.style_score,
+            render: (r) => <Text style={[cellText('right'), { color: '#F472B6', fontWeight: '800' }]}>{r.style_score}</Text> },
+          { key: 'price', label: 'Price', width: 80, align: 'right', mono: true, sortValue: (r) => r.price,
+            render: (r) => <Text style={cellText('right')}>{fmtPrice(r.price, r.currency)}</Text> },
+          { key: 'change_pct', label: '%', width: 70, align: 'right', mono: true, sortValue: (r) => r.change_pct,
+            render: (r) => <Text style={[cellText('right'), { color: changeColor(r.change_pct), fontWeight: '700' }]}>{fmtPct(r.change_pct)}</Text> },
+          { key: 'pe', label: 'P/E', width: 60, align: 'right', mono: true, sortValue: (r) => r.pe,
+            render: (r) => <Text style={cellText('right')}>{r.pe?.toFixed(1) || '—'}</Text> },
+          { key: 'roe', label: 'ROE', width: 60, align: 'right', mono: true, sortValue: (r) => r.roe,
+            render: (r) => <Text style={cellText('right')}>{r.roe ? `${r.roe.toFixed(0)}%` : '—'}</Text> },
+          { key: 'eps_growth', label: 'EPS↑', width: 70, align: 'right', mono: true, sortValue: (r) => r.eps_growth,
+            render: (r) => <Text style={cellText('right')}>{r.eps_growth ? `${r.eps_growth.toFixed(0)}%` : '—'}</Text> },
+          { key: 'market_cap', label: 'Mkt Cap', width: 90, align: 'right', mono: true, sortValue: (r) => r.market_cap,
+            render: (r) => <Text style={cellText('right')}>{fmtMarketCap(r.market_cap, r.currency)}</Text> },
+          { key: 'sector', label: 'Sector', width: 130, sortValue: (r) => r.sector || '',
+            render: (r) => <Text style={[cellText('left'), { color: theme.colors.textMuted, fontSize: 11 }]} numberOfLines={1}>{r.sector || '—'}</Text> },
         ]}
         rows={active.stocks || []}
         rowKey={(r) => r.symbol}
@@ -449,16 +470,23 @@ function InvestorBody({ data, tab, setTab }: any) {
 // ----------------------------- 7. Most Active -----------------------------
 function MostActiveBody({ data }: any) {
   return (
-    <DataTable
+    <SortableDataTable
       linkToStockField="symbol"
+      stickyField="symbol"
+      defaultSort={{ key: 'volume_surge', desc: true }}
       columns={[
-        { key: 'symbol', label: 'Symbol', width: 110, render: (r) => <SymCell symbol={r.symbol} name={r.name} /> },
-        { key: 'volume_surge', label: 'Vol ×', width: 70, align: 'right', mono: true, render: (r) => <Text style={[cellText('right'), { fontWeight: '800', color: '#FB7185' }]}>{r.volume_surge ? `${r.volume_surge.toFixed(1)}×` : '—'}</Text> },
-        { key: 'price', label: 'Price', width: 80, align: 'right', mono: true, render: (r) => <Text style={cellText('right')}>{fmtPrice(r.price, r.currency)}</Text> },
-        { key: 'change_pct', label: '%', width: 70, align: 'right', mono: true, render: (r) => <Text style={[cellText('right'), { color: changeColor(r.change_pct), fontWeight: '700' }]}>{fmtPct(r.change_pct)}</Text> },
-        { key: 'rsi', label: 'RSI', width: 50, align: 'right', mono: true, render: (r) => <Text style={cellText('right')}>{r.rsi?.toFixed(0) || '—'}</Text> },
-        { key: 'sector', label: 'Sector', width: 130, render: (r) => <Text style={[cellText('left'), { color: theme.colors.textMuted, fontSize: 11 }]} numberOfLines={1}>{r.sector || '—'}</Text> },
-        { key: 'market_cap', label: 'Mkt Cap', width: 90, align: 'right', mono: true, render: (r) => <Text style={cellText('right')}>{fmtMarketCap(r.market_cap, r.currency)}</Text> },
+        { key: 'volume_surge', label: 'Vol ×', width: 74, align: 'right', mono: true, sortValue: (r) => r.volume_surge,
+          render: (r) => <Text style={[cellText('right'), { fontWeight: '800', color: '#FB7185' }]}>{r.volume_surge ? `${r.volume_surge.toFixed(1)}×` : '—'}</Text> },
+        { key: 'price', label: 'Price', width: 80, align: 'right', mono: true, sortValue: (r) => r.price,
+          render: (r) => <Text style={cellText('right')}>{fmtPrice(r.price, r.currency)}</Text> },
+        { key: 'change_pct', label: '%', width: 70, align: 'right', mono: true, sortValue: (r) => r.change_pct,
+          render: (r) => <Text style={[cellText('right'), { color: changeColor(r.change_pct), fontWeight: '700' }]}>{fmtPct(r.change_pct)}</Text> },
+        { key: 'rsi', label: 'RSI', width: 54, align: 'right', mono: true, sortValue: (r) => r.rsi,
+          render: (r) => <Text style={cellText('right')}>{r.rsi?.toFixed(0) || '—'}</Text> },
+        { key: 'market_cap', label: 'Mkt Cap', width: 90, align: 'right', mono: true, sortValue: (r) => r.market_cap,
+          render: (r) => <Text style={cellText('right')}>{fmtMarketCap(r.market_cap, r.currency)}</Text> },
+        { key: 'sector', label: 'Sector', width: 130, sortValue: (r) => r.sector || '',
+          render: (r) => <Text style={[cellText('left'), { color: theme.colors.textMuted, fontSize: 11 }]} numberOfLines={1}>{r.sector || '—'}</Text> },
       ]}
       rows={data.stocks || []}
       rowKey={(r) => r.symbol}
@@ -479,20 +507,23 @@ function WinnersLosersBody({ data, tab, setTab }: any) {
           { value: 'losers', label: 'Losers', count: data.losers?.length },
         ]}
       />
-      <DataTable
+      <SortableDataTable
         linkToStockField="symbol"
+        stickyField="symbol"
+        defaultSort={{ key: 'change_pct', desc: tab !== 'losers' }}
         columns={[
-          { key: 'rank', label: '#', width: 36, align: 'right', render: (r) => {
-              const idx = list.indexOf(r) + 1;
-              return <Text style={[cellText('right'), { color: theme.colors.textSubtle, fontWeight: '800' }]}>{idx}</Text>;
-            } },
-          { key: 'symbol', label: 'Symbol', width: 100, render: (r) => <SymCell symbol={r.symbol} name={r.name} /> },
-          { key: 'price', label: 'Price', width: 80, align: 'right', mono: true, render: (r) => <Text style={cellText('right')}>{fmtPrice(r.price, r.currency)}</Text> },
-          { key: 'change_pct', label: '%', width: 80, align: 'right', mono: true,
+          { key: 'change_pct', label: '%', width: 80, align: 'right', mono: true, sortValue: (r) => r.change_pct,
             render: (r) => <Text style={[cellText('right'), { color: changeColor(r.change_pct), fontWeight: '800' }]}>{fmtPct(r.change_pct)}</Text> },
-          { key: 'volume_surge', label: 'Vol×', width: 60, align: 'right', mono: true, render: (r) => <Text style={cellText('right')}>{r.volume_surge ? `${r.volume_surge.toFixed(1)}×` : '—'}</Text> },
-          { key: 'rsi', label: 'RSI', width: 50, align: 'right', mono: true, render: (r) => <Text style={cellText('right')}>{r.rsi?.toFixed(0) || '—'}</Text> },
-          { key: 'sector', label: 'Sector', width: 130, render: (r) => <Text style={[cellText('left'), { color: theme.colors.textMuted, fontSize: 11 }]} numberOfLines={1}>{r.sector || '—'}</Text> },
+          { key: 'price', label: 'Price', width: 80, align: 'right', mono: true, sortValue: (r) => r.price,
+            render: (r) => <Text style={cellText('right')}>{fmtPrice(r.price, r.currency)}</Text> },
+          { key: 'volume_surge', label: 'Vol×', width: 64, align: 'right', mono: true, sortValue: (r) => r.volume_surge,
+            render: (r) => <Text style={cellText('right')}>{r.volume_surge ? `${r.volume_surge.toFixed(1)}×` : '—'}</Text> },
+          { key: 'rsi', label: 'RSI', width: 54, align: 'right', mono: true, sortValue: (r) => r.rsi,
+            render: (r) => <Text style={cellText('right')}>{r.rsi?.toFixed(0) || '—'}</Text> },
+          { key: 'market_cap', label: 'Mkt Cap', width: 90, align: 'right', mono: true, sortValue: (r) => r.market_cap,
+            render: (r) => <Text style={cellText('right')}>{fmtMarketCap(r.market_cap, r.currency)}</Text> },
+          { key: 'sector', label: 'Sector', width: 130, sortValue: (r) => r.sector || '',
+            render: (r) => <Text style={[cellText('left'), { color: theme.colors.textMuted, fontSize: 11 }]} numberOfLines={1}>{r.sector || '—'}</Text> },
         ]}
         rows={list}
         rowKey={(r) => r.symbol}

@@ -178,6 +178,8 @@ def _compute_technicals(df: pd.DataFrame) -> Dict[str, Optional[float]]:
         "rsi": None, "macd": None, "macd_signal": None,
         "ma50": None, "ma200": None, "volume_surge": None,
         "high_52w": None, "low_52w": None, "from_52w_high_pct": None,
+        "from_52w_low_pct": None, "atr": None,
+        "one_year_change_pct": None, "ytd_pct": None,
     }
     if df is None or df.empty:
         return out
@@ -216,6 +218,36 @@ def _compute_technicals(df: pd.DataFrame) -> Dict[str, Optional[float]]:
     out["high_52w"] = _safe(hi); out["low_52w"] = _safe(lo)
     if last and hi and hi > 0:
         out["from_52w_high_pct"] = _safe((last - hi) / hi * 100)
+    if last and lo and lo > 0:
+        out["from_52w_low_pct"] = _safe((last - lo) / lo * 100)
+
+    # ATR(14) — average true range
+    if {"High", "Low"}.issubset(df.columns) and len(close) >= 15:
+        try:
+            high = df["High"]; low = df["Low"]; prev_close = df["Close"].shift(1)
+            tr = pd.concat([(high - low), (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)
+            out["atr"] = _safe(tr.rolling(14).mean().iloc[-1])
+        except Exception:
+            pass
+
+    # 1-year change %
+    if len(close) >= 2:
+        first = _safe(close.iloc[0])
+        if first and first > 0 and last:
+            out["one_year_change_pct"] = _safe((last - first) / first * 100)
+
+    # YTD %
+    try:
+        year = pd.Timestamp.utcnow().year
+        jan1 = pd.Timestamp(year=year, month=1, day=1, tz="UTC")
+        ytd = close[close.index >= jan1]
+        if len(ytd) >= 1 and last:
+            base = _safe(ytd.iloc[0])
+            if base and base > 0:
+                out["ytd_pct"] = _safe((last - base) / base * 100)
+    except Exception:
+        pass
+
     return out
 
 
@@ -399,6 +431,14 @@ def _fetch_summary_layer(symbol: str) -> Dict[str, Any]:
         "forward_pe": _safe(sd.get("forwardPE")),
         "peg_ratio": _safe(ks.get("pegRatio")),
         "ps_ratio": _safe(sd.get("priceToSalesTrailing12Months")),
+        # --- Extra valuation / size (available from Yahoo) ---
+        "enterprise_value": _safe(ks.get("enterpriseValue")),
+        "ev_ebitda": _safe(ks.get("enterpriseToEbitda")),
+        "ev_sales": _safe(ks.get("enterpriseToRevenue")),
+        "book_value_per_share": _safe(ks.get("bookValue")),
+        "float_shares": _safe(ks.get("floatShares")),
+        "shares_outstanding": _safe(ks.get("sharesOutstanding")),
+        "payout_ratio": (_safe(sd.get("payoutRatio")) * 100) if _safe(sd.get("payoutRatio")) is not None else None,
         # --- REAL analyst data ---
         "target_mean_price": _safe(fd.get("targetMeanPrice")),
         "target_high_price": _safe(fd.get("targetHighPrice")),
@@ -467,6 +507,26 @@ def _merge_bundle(symbol: str, quote: Dict[str, Any], chart_layer: Dict[str, Any
         "total_revenue": summary_layer.get("total_revenue"),
         "ebitda": summary_layer.get("ebitda"),
         "beta": summary_layer.get("beta"),
+        # --- Price/perf extras (from quote, zero extra cost) ---
+        "open": _safe(quote.get("regularMarketOpen")),
+        "day_high": _safe(quote.get("regularMarketDayHigh")),
+        "day_low": _safe(quote.get("regularMarketDayLow")),
+        "prev_close": _safe(quote.get("regularMarketPreviousClose")),
+        "volume": _safe(quote.get("regularMarketVolume")),
+        "avg_volume": _safe(quote.get("averageDailyVolume3Month")) or _safe(quote.get("averageDailyVolume10Day")),
+        "shares_outstanding": _safe(quote.get("sharesOutstanding")) or summary_layer.get("shares_outstanding"),
+        "float_shares": summary_layer.get("float_shares"),
+        # --- Valuation extras ---
+        "enterprise_value": summary_layer.get("enterprise_value"),
+        "ev_ebitda": summary_layer.get("ev_ebitda"),
+        "ev_sales": summary_layer.get("ev_sales"),
+        "book_value_per_share": summary_layer.get("book_value_per_share"),
+        "payout_ratio": summary_layer.get("payout_ratio"),
+        # --- Computed technicals (from chart) ---
+        "from_52w_low_pct": chart_layer.get("from_52w_low_pct"),
+        "atr": chart_layer.get("atr"),
+        "one_year_change_pct": chart_layer.get("one_year_change_pct"),
+        "ytd_pct": chart_layer.get("ytd_pct"),
         "sparkline": chart_layer.get("sparkline") or [],
         "rsi": chart_layer.get("rsi"),
         "macd": chart_layer.get("macd"),
@@ -505,6 +565,11 @@ def _merge_bundle(symbol: str, quote: Dict[str, Any], chart_layer: Dict[str, Any
         "country": summary_layer.get("country"),
         "employees": summary_layer.get("employees"),
     }
+    # --- Derived ratios ---
+    vol = bundle.get("volume"); avg_vol = bundle.get("avg_volume")
+    bundle["rvol"] = round(vol / avg_vol, 2) if (vol and avg_vol and avg_vol > 0) else None
+    mcap = bundle.get("market_cap"); fcf = bundle.get("free_cashflow")
+    bundle["p_fcf"] = round(mcap / fcf, 2) if (mcap and fcf and fcf > 0) else None
     return bundle
 
 
