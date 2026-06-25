@@ -167,6 +167,7 @@ export default function SortableDataTable({
               {sortedRows.map((r, idx) => (
                 <TouchableOpacity
                   key={rowKey ? rowKey(r) : idx.toString()}
+                  testID={`row-${r[stickyField]}`}
                   activeOpacity={0.7}
                   onPress={() => handlePressRow(r)}
                   style={[styles.bodyRow, idx % 2 === 1 && { backgroundColor: theme.colors.bg2 }]}
@@ -177,9 +178,11 @@ export default function SortableDataTable({
                       tone === 'pos' ? theme.colors.success :
                       tone === 'neg' ? theme.colors.error :
                       theme.colors.text;
+                    const rendered = c.render ? c.render(r) : (r[c.key] ?? '—');
+                    const isPrimitive = typeof rendered === 'string' || typeof rendered === 'number';
                     return (
                       <View key={c.key} style={[styles.bodyCell, { width: c.width || 100 }]}>
-                        {c.render ? c.render(r) : (
+                        {isPrimitive ? (
                           <Text
                             numberOfLines={1}
                             style={[
@@ -188,9 +191,9 @@ export default function SortableDataTable({
                               c.mono && { fontVariant: ['tabular-nums'] },
                             ]}
                           >
-                            {r[c.key] ?? '—'}
+                            {rendered}
                           </Text>
-                        )}
+                        ) : rendered}
                       </View>
                     );
                   })}
