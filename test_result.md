@@ -167,11 +167,41 @@ frontend:
             Verified visually: AI Picks detail shows spotlight (INCY) + factor bars + 20-row table
             with SYMBOL/SCORE/RATING/PRICE/%/PE/ROE columns. Tabs switching works.
 
+  - task: "Bug fix: SortableDataTable row alignment + header sync"
+    implemented: true
+    working: true
+    file: "frontend/src/components/widgets/SortableDataTable.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "Rewrote with fixed ROW_HEIGHT=56 on both sticky and scrolling cells. Synced header horizontal scroll via refs + onScroll handlers (bidirectional)."
+        - working: true
+          agent: "testing"
+          comment: "VERIFIED: 0 misalignment across 27 Y-position groups. Header sync 0px diff bidirectionally. Tested on Forecast Horizons + AI Picks tables."
+
+  - task: "Bug fix: Interactive PriceChart with period % + touch tooltip + 2-finger diff"
+    implemented: true
+    working: true
+    file: "frontend/src/components/PriceChart.tsx, frontend/app/stock/[symbol].tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "Rewrote chart with PanResponder for 1-2 touch tracking. Banner shows period % when idle, single-touch price+date tooltip, two-finger % difference live updating. Now receives timestamps prop from stock detail."
+        - working: true
+          agent: "testing"
+          comment: "VERIFIED: Period banner shows +7.14% on AFL. Period chips update correctly. Touch interaction code reviewed (multi-touch needs physical device — Playwright limitation, not code issue)."
+
 metadata:
   created_by: "main_agent"
-  version: "1.1"
-  test_sequence: 0
-  run_ui: false
+  version: "1.3"
+  test_sequence: 1
+  run_ui: true
 
 test_plan:
   current_focus:
