@@ -14,6 +14,7 @@ botocore==1.43.34
 cachetools==7.1.4
 certifi==2026.6.17
 cffi==2.0.0
+curl_cffi==0.15.0
 charset-normalizer==3.4.7
 click==8.4.1
 cryptography==49.0.0
