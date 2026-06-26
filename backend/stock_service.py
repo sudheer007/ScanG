@@ -719,6 +719,106 @@ async def get_history(symbol: str, period: str = "1mo", interval: str = "1d"):
     return await asyncio.to_thread(_fetch_history, symbol, period, interval)
 
 
+# ---------- Per-stock Events (analyst actions, earnings history, calendar) ----------
+EVENTS_CACHE = TTLCache(maxsize=3000, ttl=30 * 60)  # 30 min
+
+
+def _raw(v):
+    if isinstance(v, dict):
+        return v.get("raw")
+    return v
+
+
+def _fetch_events(symbol: str) -> Dict[str, Any]:
+    if symbol in EVENTS_CACHE:
+        return EVENTS_CACHE[symbol]
+    summary = _yh_quote_summary(symbol)
+    udh = (summary.get("upgradeDowngradeHistory") or {}).get("history") or []
+    eh = (summary.get("earningsHistory") or {}).get("history") or []
+    ce = summary.get("calendarEvents") or {}
+    et = (summary.get("earningsTrend") or {}).get("trend") or []
+    fd = summary.get("financialData") or {}
+
+    # --- Analyst upgrade / downgrade history ---
+    analyst_actions: List[Dict[str, Any]] = []
+    try:
+        for h in sorted(udh, key=lambda x: x.get("epochGradeDate") or 0, reverse=True)[:15]:
+            action = (h.get("action") or "").lower()
+            tone = "pos" if action in ("up", "init", "reit") else ("neg" if action == "down" else "neutral")
+            analyst_actions.append({
+                "date_epoch": h.get("epochGradeDate"),
+                "firm": h.get("firm"),
+                "from_grade": h.get("fromGrade") or None,
+                "to_grade": h.get("toGrade") or None,
+                "action": action or None,
+                "tone": tone,
+            })
+    except Exception:
+        pass
+
+    # --- Earnings history (last quarters) ---
+    earnings_history: List[Dict[str, Any]] = []
+    for e in eh:
+        sp = _safe(_raw(e.get("surprisePercent")))
+        if sp is not None and abs(sp) <= 1.5:
+            sp = sp * 100  # Yahoo returns a fraction (0.0346 -> 3.46%)
+        earnings_history.append({
+            "quarter_epoch": _raw(e.get("quarter")),
+            "eps_actual": _safe(_raw(e.get("epsActual"))),
+            "eps_estimate": _safe(_raw(e.get("epsEstimate"))),
+            "eps_difference": _safe(_raw(e.get("epsDifference"))),
+            "surprise_pct": round(sp, 2) if sp is not None else None,
+        })
+    earnings_history.sort(key=lambda x: x.get("quarter_epoch") or 0, reverse=True)
+
+    # --- Calendar (next earnings, ex-dividend, dividend payment) ---
+    earnings_cal = ce.get("earnings") or {}
+    ed = earnings_cal.get("earningsDate") or []
+    next_earnings_epoch = None
+    if ed:
+        first = ed[0]
+        next_earnings_epoch = _raw(first) if not isinstance(first, (int, float)) else first
+    ex_div_epoch = _raw(ce.get("exDividendDate"))
+    div_date_epoch = _raw(ce.get("dividendDate"))
+    eps_est_avg = _safe(_raw(earnings_cal.get("earningsAverage")))
+    eps_est_low = _safe(_raw(earnings_cal.get("earningsLow")))
+    eps_est_high = _safe(_raw(earnings_cal.get("earningsHigh")))
+    rev_est_avg = _safe(_raw(earnings_cal.get("revenueAverage")))
+
+    # --- Forward estimates for next quarter / year ---
+    next_q_eps = next_y_eps = None
+    for t in et:
+        if t.get("period") == "+1q":
+            next_q_eps = _safe(_raw((t.get("earningsEstimate") or {}).get("avg")))
+        if t.get("period") == "+1y":
+            next_y_eps = _safe(_raw((t.get("earningsEstimate") or {}).get("avg")))
+
+    out = {
+        "symbol": symbol,
+        "calendar": {
+            "next_earnings_epoch": next_earnings_epoch,
+            "ex_dividend_epoch": ex_div_epoch,
+            "dividend_date_epoch": div_date_epoch,
+            "eps_estimate_avg": eps_est_avg,
+            "eps_estimate_low": eps_est_low,
+            "eps_estimate_high": eps_est_high,
+            "revenue_estimate_avg": rev_est_avg,
+            "next_quarter_eps_est": next_q_eps,
+            "next_year_eps_est": next_y_eps,
+        },
+        "analyst_actions": analyst_actions,
+        "earnings_history": earnings_history[:8],
+        "recommendation_key": fd.get("recommendationKey"),
+        "target_mean_price": _safe(_raw(fd.get("targetMeanPrice"))),
+    }
+    EVENTS_CACHE[symbol] = out
+    return out
+
+
+async def get_stock_events(symbol: str) -> Dict[str, Any]:
+    return await asyncio.to_thread(_fetch_events, symbol)
+
+
 # ---------- Radar Strategies ----------
 RADAR_STRATEGIES = {
     "momentum_breakouts": {"title": "Momentum Breakouts", "subtitle": "Strong uptrend with volume surge near 52w highs", "icon": "trending-up"},

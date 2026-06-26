@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 import stock_service as ss
 import discover_service as ds
 import analyzer_service as az
+import news_service as news
 from stock_universe import get_universe, currency
 
 ROOT_DIR = Path(__file__).parent
@@ -133,6 +134,12 @@ async def stock_history(
     return {"symbol": symbol, "period": period, "interval": interval, "points": data}
 
 
+@api_router.get("/stocks/{symbol}/events")
+async def stock_events(symbol: str):
+    """Per-stock events: analyst upgrade/downgrade history, earnings history & surprises, calendar."""
+    return await ss.get_stock_events(symbol)
+
+
 @api_router.get("/stocks/batch/quotes")
 async def stock_batch_quotes(symbols: str = Query(...)):
     """Comma-separated symbols. Used for watchlist refresh."""
@@ -207,6 +214,18 @@ async def search_stocks(q: str = Query(..., min_length=1)):
         if len(results) >= 20:
             break
     return {"query": q, "results": results[:20]}
+
+
+# ---------- News (Yahoo Finance — real publishers, no API key) ----------
+@api_router.get("/news/market")
+async def news_market(market: str = Query("US"), limit: int = Query(30, ge=1, le=60)):
+    return await news.market_news(market, limit)
+
+
+@api_router.get("/news/stock/{symbol}")
+async def news_stock(symbol: str, limit: int = Query(20, ge=1, le=40)):
+    return await news.stock_news(symbol, limit)
+
 
 # ---------- Discover (combined widgets feed + per-widget details) ----------
 @api_router.get("/discover/feed")

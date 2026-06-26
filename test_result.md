@@ -115,7 +115,7 @@ backend:
     file: "backend/discover_service.py, backend/server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
         - working: true
           agent: "main"
@@ -127,6 +127,75 @@ backend:
             surge, winners/losers. Endpoints: /api/discover/feed (combined), /api/discover/ai-picks,
             /events, /analyst-ratings, /popular-screeners, /valuation, /investor-picks, /most-active,
             /winners-losers. Verified manually via curl — all return rich data.
+
+  - task: "News service backend (news_service.py — Yahoo Finance, no API key)"
+    implemented: true
+    working: true
+    file: "backend/news_service.py, backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: |
+            Added news_service.py using Yahoo Finance v1/finance/search (real publishers).
+            15-min TTL cache. Endpoints: /api/news/stock/{symbol} and /api/news/market?market=US|IN
+            (aggregated, deduped, sorted by time). Verified via curl.
+
+  - task: "Per-stock events endpoint (analyst actions, earnings history, calendar)"
+    implemented: true
+    working: true
+    file: "backend/stock_service.py, backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: |
+            Added /api/stocks/{symbol}/events extracting upgradeDowngradeHistory, earningsHistory
+            (surprise % normalized), calendarEvents. 30-min TTL cache. Verified via curl on AAPL.
+        - working: true
+          agent: "testing"
+          comment: |
+            VERIFIED: Comprehensive testing of all NEW endpoints completed successfully.
+            
+            **News Market Endpoint (GET /api/news/market)**
+            ✓ US market: Returns 30 news items, properly deduped (no duplicate links), sorted by published_epoch desc
+            ✓ IN market: Returns 10 news items, properly deduped and sorted
+            ✓ All required fields present: market, currency, count, news
+            ✓ News items have all required fields: uuid, title, publisher, link, published_epoch, type, thumbnail, related_tickers
+            ✓ related_tickers is array type
+            
+            **News Stock Endpoint (GET /api/news/stock/{symbol})**
+            ✓ AAPL: Returns 10 news items with correct structure
+            ✓ TSLA: Returns 10 news items with correct structure
+            ✓ MSFT: Returns 10 news items with correct structure
+            ✓ RELIANCE.NS: Returns 10 news items with correct structure
+            ✓ All have required fields: symbol, count, news
+            
+            **Stock Events Endpoint (GET /api/stocks/{symbol}/events)**
+            ✓ AAPL: 15 analyst actions, 4 earnings records - all fields present
+            ✓ MSFT: 15 analyst actions, 4 earnings records - all fields present
+            ✓ TSLA: 15 analyst actions, 4 earnings records - all fields present
+            ✓ Calendar has all required keys: next_earnings_epoch, ex_dividend_epoch, dividend_date_epoch, 
+              eps_estimate_avg, eps_estimate_low, eps_estimate_high, next_quarter_eps_est, next_year_eps_est
+            ✓ Analyst actions have correct structure: date_epoch, firm, from_grade, to_grade, action, tone
+            ✓ Tone values are valid: pos/neg/neutral
+            ✓ Earnings history has correct structure: quarter_epoch, eps_actual, eps_estimate, eps_difference, surprise_pct
+            ✓ CRITICAL: surprise_pct is correctly formatted as percentage (3.46, 6.34, 10.12) NOT fraction (0.03)
+            ✓ recommendation_key and target_mean_price present
+            
+            **Regression Sanity Checks - All Passing:**
+            ✓ GET /api/markets/overview?market=US → 200 OK
+            ✓ GET /api/discover/sector-rotation?market=US → 200 OK
+            ✓ GET /api/discover/earnings-calendar?market=US → 200 OK
+            ✓ GET /api/discover/dividend-calendar?market=US → 200 OK
+            ✓ GET /api/stocks/AAPL → 200 OK
+            
+            All 14 tests passed with 0 failures, 0 warnings. Backend is production-ready.
+
 
 frontend:
   - task: "Discover tab at bottom center + scrollable widget feed"
@@ -199,13 +268,14 @@ frontend:
 
 metadata:
   created_by: "main_agent"
-  version: "1.3"
-  test_sequence: 1
+  version: "1.4"
+  test_sequence: 2
   run_ui: true
 
 test_plan:
   current_focus:
-    - "Discover widgets backend (discover_service.py + endpoints)"
+    - "News service backend (news_service.py — Yahoo Finance, no API key)"
+    - "Per-stock events endpoint (analyst actions, earnings history, calendar)"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -316,3 +386,49 @@ agent_communication:
         - Touch interaction code: ✓ IMPLEMENTED (cannot verify in web browser)
         
         No critical issues found. Minor limitation: touch gestures require physical device testing.
+
+    - agent: "testing"
+      message: |
+        ## NEW Backend Endpoints Testing Complete ✅
+        
+        Comprehensive testing of all NEW endpoints requested in review:
+        
+        **Test Results: 14/14 PASSED (0 failures, 0 warnings)**
+        
+        **NEW Endpoints Tested:**
+        
+        1. **Market News API** (GET /api/news/market)
+           ✅ US market: 30 items returned, properly deduped, sorted by published_epoch desc
+           ✅ IN market: 10 items returned, properly deduped and sorted
+           ✅ All required fields validated: market, currency, count, news array
+           ✅ News items structure verified: uuid, title, publisher, link, published_epoch, type, thumbnail, related_tickers
+        
+        2. **Stock News API** (GET /api/news/stock/{symbol})
+           ✅ AAPL, TSLA, MSFT, RELIANCE.NS all return valid data
+           ✅ All required fields present: symbol, count, news array
+           ✅ News items have correct structure
+        
+        3. **Stock Events API** (GET /api/stocks/{symbol}/events)
+           ✅ AAPL: 15 analyst actions, 4 earnings records
+           ✅ MSFT: 15 analyst actions, 4 earnings records
+           ✅ TSLA: 15 analyst actions, 4 earnings records
+           ✅ Calendar structure validated with all required keys
+           ✅ Analyst actions have correct tone values (pos/neg/neutral)
+           ✅ **CRITICAL VALIDATION PASSED**: surprise_pct correctly formatted as percentage (3.46%, 6.34%, 10.12%) NOT fraction (0.03)
+        
+        **Regression Tests - All Passing:**
+        ✅ GET /api/markets/overview?market=US
+        ✅ GET /api/discover/sector-rotation?market=US
+        ✅ GET /api/discover/earnings-calendar?market=US
+        ✅ GET /api/discover/dividend-calendar?market=US
+        ✅ GET /api/stocks/AAPL
+        
+        **Data Quality Verification:**
+        - Deduplication working correctly (no duplicate links in news feeds)
+        - Sorting by published_epoch descending confirmed
+        - All required fields present in responses
+        - Data types validated (arrays, objects, numbers, strings)
+        - Percentage normalization working correctly (earnings surprise_pct)
+        
+        **Backend Status:** All services running without errors. No critical issues found.
+        Backend is production-ready for these endpoints.
