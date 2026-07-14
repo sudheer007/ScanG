@@ -1,0 +1,16 @@
+{
+  "earnings": [
+    {
+      "date": "2026-07-30T00:00:00.000Z",
+      "reportYear": 2026,
+      "reportMonth": 6,
+      "epsActual": null,
+      "epsForecast": 1.89,
+      "epsSurprisePercent": null,
+      "revenueActual": null,
+      "revenueForecast": 108860000000
+    }
+  ],
+  "forecasts": [{"revenue": 108860000000, "eps": 1.89, "reportYear": 2026, "reportMonth": 6}],
+  "keyMetrics": {"latest_release": "2026-04-01", "next_release": "2026-07-30"}
+}

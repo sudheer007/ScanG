@@ -1,0 +1,12 @@
+{
+  "historicalDataStore": {
+    "historicalData": {
+      "data": [
+        {"date": "2026-07-01", "open": 290, "high": 295, "low": 288, "close": 294, "volume": 50000000}
+      ],
+      "summary": {"last_change_percent": 1.2}
+    },
+    "dateRange": "1m",
+    "timeFrame": "1D"
+  }
+}

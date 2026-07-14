@@ -1,0 +1,5 @@
+[
+  {"id": 523, "url": "/equities/reliance-steel---aluminum-co.", "description": "Reliance Steel & Aluminum Co", "symbol": "RS", "exchange": "NYSE", "type": "Stock - NYSE"},
+  {"id": 18367, "url": "/equities/reliance-industries", "description": "Reliance Industries Ltd", "symbol": "RELI", "exchange": "NSE", "type": "Stock - NSE"},
+  {"id": 39657, "url": "/equities/reliance-industries?cid=39657", "description": "Reliance Industries Ltd", "symbol": "RELI", "exchange": "BSE", "type": "Stock - BSE"}
+]

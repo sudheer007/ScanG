@@ -1,0 +1,18 @@
+{
+  "ratiosData": {
+    "company_name": "Apple Inc",
+    "currency_id": 12,
+    "indicators": {
+      "beta": {
+        "name": "Beta",
+        "value": 1.06,
+        "industry_value": 1.21
+      },
+      "pe_ratio_ttm": {
+        "name": "P/E Ratio TTM",
+        "value": 35.7,
+        "industry_value": 28.2
+      }
+    }
+  }
+}

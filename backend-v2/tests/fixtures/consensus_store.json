@@ -1,0 +1,27 @@
+{
+  "consensusEstimatesStore": {
+    "forecastSummary": {
+      "instrument_id": 6408,
+      "target_price_consensus_mean": 315.09,
+      "consensus_recommendation": "BUY",
+      "number_of_analysts_buy": 28,
+      "number_of_analysts_hold": 16,
+      "number_of_analysts_sell": 3
+    },
+    "actualHistoryPrices": [{"date": 1686441600000, "price": 180.97}],
+    "forecastHistoryPrices": [{"date": "2024-07-08", "price": 211.19}]
+  },
+  "forecastStore": {
+    "forecast": {"target_price_consensus_mean": 315.09},
+    "ratings": [
+      {
+        "date": "2026-07-01",
+        "firm_name": "UBS",
+        "analyst_name": "David Vogt",
+        "action": "Maintain",
+        "rating": "Hold",
+        "price_target": 296
+      }
+    ]
+  }
+}

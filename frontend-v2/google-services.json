@@ -1,0 +1,55 @@
+{
+  "project_info": {
+    "project_number": "384267234007",
+    "project_id": "fintech-58166",
+    "storage_bucket": "fintech-58166.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:384267234007:android:c8aeed704ad820285f9e92",
+        "android_client_info": {
+          "package_name": "com.scang.frontend"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "384267234007-724ham0ei83grbopmbedqehqqfaoqooo.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.scang.frontend",
+            "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
+          }
+        },
+        {
+          "client_id": "384267234007-f51390eb5r3c2c3bh8qovr6sb2fd8le9.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.scang.frontend",
+            "certificate_hash": "bf5805562420ac192b96e0edfb9dc057876783f8"
+          }
+        },
+        {
+          "client_id": "384267234007-tjiu16psvgjb0beeikqca87g9uqer6b9.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCN3HsiTSpWV-v2WjAtmO6-iicJL7PH_K0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "384267234007-tjiu16psvgjb0beeikqca87g9uqer6b9.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

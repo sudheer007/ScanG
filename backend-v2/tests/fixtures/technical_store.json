@@ -1,0 +1,15 @@
+{
+  "technicalStore": {
+    "analysisDetails": {
+      "1d": {
+        "summary": "strong_buy",
+        "timeframe": "1d",
+        "indicators": {"rsi": 62},
+        "movingAverages": {"sma_50": 280},
+        "pivotPoints": {"pivot": 300}
+      }
+    },
+    "technicalDaily": {"summary": "strong_buy"},
+    "timeframe": "1h"
+  }
+}

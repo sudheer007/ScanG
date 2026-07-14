@@ -1,0 +1,12 @@
+{
+  "equityDividends": [
+    {
+      "div_date": "2025-11-10T00:00:00Z",
+      "div_amount": 0.26,
+      "split_adj_div_amount": 0.26,
+      "div_payment_type": "Quarterly",
+      "pay_date": "2025-11-13T00:00:00Z",
+      "yield": 0.38
+    }
+  ]
+}

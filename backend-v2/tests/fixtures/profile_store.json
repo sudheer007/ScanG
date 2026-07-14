@@ -1,0 +1,9 @@
+{
+  "profile": {
+    "sector": {"name": "Technology", "link": "/stock-screener/united-states/technology"},
+    "industry": {"name": "Computers, Phones & Household Electronics", "link": "/stock-screener/united-states/technology/computers-phones-and-household-electronics"},
+    "market": {"name": "United States", "link": "/markets/united-states"},
+    "employees": 166000,
+    "description": "Apple Inc. designs, manufactures, and markets smartphones."
+  }
+}
