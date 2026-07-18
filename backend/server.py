@@ -14,6 +14,8 @@ import stock_service as ss
 import discover_service as ds
 import analyzer_service as az
 import news_service as news
+import fundamentals_service as fs
+import research_service as rs
 from stock_universe import get_universe, currency
 
 ROOT_DIR = Path(__file__).parent
@@ -304,6 +306,50 @@ async def deep_analyzer(symbol: str):
     return await az.analyzer(symbol)
 
 
+# ---------- Fundamentals Engine (Track A) ----------
+@api_router.get("/fundamentals/{symbol}")
+async def fundamentals_detail(symbol: str):
+    """Piotroski F-Score, Altman Z-Score, earnings quality, trajectories, red flags, default DCF."""
+    result = await fs.get_fundamentals(symbol)
+    if not result.get("available"):
+        raise HTTPException(status_code=404, detail=result.get("reason", f"Fundamentals for {symbol} not found"))
+    return result
+
+
+@api_router.get("/fundamentals/{symbol}/dcf")
+async def fundamentals_dcf(
+    symbol: str,
+    growth: Optional[float] = Query(None, description="Revenue/FCF growth %, stage 1"),
+    discount: float = Query(10.0, ge=1.0, le=30.0, description="Discount rate %"),
+    terminal_growth: float = Query(2.5, ge=0.0, le=6.0, description="Terminal growth %"),
+    years: int = Query(10, ge=3, le=20),
+):
+    """DCF intrinsic value with adjustable assumptions."""
+    result = await fs.get_dcf(symbol, growth, discount, terminal_growth, years)
+    if result.get("reason") == "no financial statements found":
+        raise HTTPException(status_code=404, detail=result["reason"])
+    return result
+
+
+@api_router.get("/fundamentals/{symbol}/peers")
+async def fundamentals_peers(symbol: str):
+    """Sector peer comparison ranked on valuation / growth / quality."""
+    result = await fs.get_peers(symbol)
+    if not result.get("available"):
+        raise HTTPException(status_code=404, detail=result.get("reason", f"Peers for {symbol} not found"))
+    return result
+
+
+# ---------- AI Research Analyst (Track C) ----------
+@api_router.get("/research/{symbol}")
+async def research_note(symbol: str, force: bool = Query(False)):
+    """LLM-generated research note: thesis, bull/bear case, risks, catalysts, valuation summary."""
+    result = await rs.get_research_note(symbol, db, force)
+    if result.get("error") == "unavailable":
+        raise HTTPException(status_code=503, detail=result.get("detail", "AI research analyst not configured"))
+    if result.get("error") == "no_data":
+        raise HTTPException(status_code=404, detail=f"Not enough data to research {symbol}")
+    return result
 
 
 
