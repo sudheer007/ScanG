@@ -1,15 +1,18 @@
 """AI Research Analyst (Track C) — LLM-generated structured research notes.
 
 Feeds Track A fundamentals (pillar scores, Piotroski/Altman, red flags, DCF,
-peer comparison) plus live quote + recent headlines into Claude, and asks for
-a structured research note (thesis, bull/bear case, risks, catalysts,
-valuation summary). Cached once per calendar day per symbol in MongoDB.
+peer comparison) plus live quote + recent headlines into Google's Gemini API,
+and asks for a structured research note (thesis, bull/bear case, risks,
+catalysts, valuation summary). Cached once per calendar day per symbol in
+MongoDB.
 
-Gracefully unavailable (503 from the route) when ANTHROPIC_API_KEY is unset —
+Gracefully unavailable (503 from the route) when GOOGLE_API_KEY is unset —
 this is an optional enhancement layer, not a hard dependency.
 """
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import os
 from datetime import datetime, timezone
@@ -21,7 +24,7 @@ import news_service as news
 
 log = logging.getLogger(__name__)
 
-MODEL = "claude-opus-4-8"
+MODEL = "gemini-3.5-flash"
 COLLECTION = "research_notes"
 
 _client = None
@@ -29,19 +32,20 @@ _client_checked = False
 
 
 def _get_client():
-    """Lazily construct the Anthropic client. Returns None if no API key configured."""
+    """Lazily construct the Google Gen AI client. Returns None if no API key configured."""
     global _client, _client_checked
     if _client_checked:
         return _client
     _client_checked = True
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        log.info("ANTHROPIC_API_KEY not set — AI research analyst disabled")
+    api_key = os.environ.get("GOOGLE_API_KEY")
+    if not api_key:
+        log.info("GOOGLE_API_KEY not set — AI research analyst disabled")
         return None
     try:
-        import anthropic
-        _client = anthropic.Anthropic()
+        from google import genai
+        _client = genai.Client(api_key=api_key)
     except Exception as e:
-        log.warning(f"failed to init Anthropic client: {e}")
+        log.warning(f"failed to init Google Gen AI client: {e}")
         _client = None
     return _client
 
@@ -173,7 +177,7 @@ def _build_context(symbol: str, bundle: Dict[str, Any], fund: Dict[str, Any], pe
 
 
 async def generate_note(symbol: str) -> Optional[Dict[str, Any]]:
-    """Call Claude to generate a fresh research note. Returns None if the client is unavailable."""
+    """Call Gemini to generate a fresh research note. Returns None if the client is unavailable."""
     client = _get_client()
     if client is None:
         return None
@@ -197,26 +201,33 @@ async def generate_note(symbol: str) -> Optional[Dict[str, Any]]:
     )
 
     try:
-        response = client.messages.create(
+        from google.genai import types
+        response = await asyncio.to_thread(
+            client.models.generate_content,
             model=MODEL,
-            max_tokens=4096,
-            system=system_prompt,
-            thinking={"type": "adaptive"},
-            output_config={"effort": "high", "format": {"type": "json_schema", "schema": RESEARCH_NOTE_SCHEMA}},
-            messages=[{"role": "user", "content": f"Write a research note for this stock based on the data below.\n\n{context}"}],
+            contents=f"Write a research note for this stock based on the data below.\n\n{context}",
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                response_mime_type="application/json",
+                response_json_schema=RESEARCH_NOTE_SCHEMA,
+            ),
         )
     except Exception as e:
         log.warning(f"research note generation failed for {symbol}: {e}")
         return {"__error__": str(e)}
 
-    if response.stop_reason == "refusal":
-        return {"__error__": "generation refused"}
+    if not response.candidates:
+        block_reason = getattr(getattr(response, "prompt_feedback", None), "block_reason", None)
+        return {"__error__": f"generation blocked ({block_reason or 'no candidates'})"}
 
-    text = next((b.text for b in response.content if b.type == "text"), None)
+    finish_reason = str(response.candidates[0].finish_reason or "")
+    if finish_reason and finish_reason not in ("STOP", "FinishReason.STOP"):
+        return {"__error__": f"generation blocked ({finish_reason})"}
+
+    text = response.text
     if not text:
         return {"__error__": "empty response"}
 
-    import json
     try:
         note = json.loads(text)
     except Exception:
@@ -230,7 +241,6 @@ async def generate_note(symbol: str) -> Optional[Dict[str, Any]]:
 
 
 async def _gather(symbol: str):
-    import asyncio
     return await asyncio.gather(
         ss.get_bundle(symbol),
         fs.get_fundamentals(symbol),
@@ -249,7 +259,7 @@ async def get_research_note(symbol: str, db, force: bool = False) -> Dict[str, A
     if _get_client() is None:
         return {
             "error": "unavailable",
-            "detail": "AI research analyst is not configured (ANTHROPIC_API_KEY not set on the server).",
+            "detail": "AI research analyst is not configured (GOOGLE_API_KEY not set on the server).",
         }
 
     today = _today_key()
