@@ -422,20 +422,34 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+_prewarm_task = None
+
+
 @app.on_event("startup")
 async def prewarm():
-    """Pre-warm caches for both markets so first user request is fast."""
+    """Keep the universe cache warm on a timer so real requests never pay the
+    full-universe Yahoo fetch cost. UNIVERSE_BUNDLE_CACHE's TTL (10 min) is
+    longer than this refresh interval, so as long as this loop is running the
+    cache never goes cold — only a backend restart (deploy) causes one cold
+    request before the first cycle completes."""
     import asyncio
-    async def _warm():
-        try:
-            await ss.get_market_universe("US")
-            await ss.get_market_universe("IN")
-            logger.info("Universe cache prewarmed for US + IN")
-        except Exception as e:
-            logger.warning(f"prewarm failed: {e}")
-    asyncio.create_task(_warm())
+
+    async def _loop():
+        while True:
+            try:
+                await ss.get_market_universe("US")
+                await ss.get_market_universe("IN")
+                logger.info("Universe cache prewarmed for US + IN")
+            except Exception as e:
+                logger.warning(f"prewarm cycle failed: {e}")
+            await asyncio.sleep(5 * 60)
+
+    global _prewarm_task
+    _prewarm_task = asyncio.create_task(_loop())
 
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
+    if _prewarm_task:
+        _prewarm_task.cancel()
     client.close()
