@@ -16,6 +16,7 @@ import analyzer_service as az
 import news_service as news
 import fundamentals_service as fs
 import research_service as rs
+import insider_service as ins
 from stock_universe import get_universe, currency
 
 ROOT_DIR = Path(__file__).parent
@@ -350,6 +351,13 @@ async def research_note(symbol: str, force: bool = Query(False)):
     if result.get("error") == "no_data":
         raise HTTPException(status_code=404, detail=f"Not enough data to research {symbol}")
     return result
+
+
+# ---------- Insider & Institutional Ownership (Track B) ----------
+@api_router.get("/ownership/{symbol}")
+async def ownership(symbol: str):
+    """Real SEC EDGAR Form 4 insider transactions + Yahoo-aggregated institutional holders. US stocks only."""
+    return await ins.get_ownership(symbol)
 
 
 
