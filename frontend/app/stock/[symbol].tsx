@@ -11,6 +11,17 @@ import PriceChart from '@/src/components/PriceChart';
 import EventsWidget from '@/src/components/EventsWidget';
 import NewsList from '@/src/components/NewsList';
 import { ErrorState, LoadingState } from '@/src/components/States';
+import SegmentedTabs from '@/src/components/widgets/SegmentedTabs';
+import { QualityTab, ValuationTab, GrowthTab, HealthTab, AINoteTab } from '@/src/components/FundamentalsTerminal';
+
+const RESEARCH_TABS = [
+  { value: 'overview', label: 'Overview' },
+  { value: 'quality', label: 'Quality' },
+  { value: 'valuation', label: 'Valuation' },
+  { value: 'growth', label: 'Growth' },
+  { value: 'health', label: 'Health' },
+  { value: 'ai', label: 'AI Note' },
+];
 
 const PERIODS: { label: string; period: string; interval: string }[] = [
   { label: '1D', period: '1d', interval: '5m' },
@@ -34,6 +45,7 @@ export default function StockDetailScreen() {
   const [inList, setInList] = useState(false);
   const [events, setEvents] = useState<StockEvents | null>(null);
   const [news, setNews] = useState<NewsItem[]>([]);
+  const [tab, setTab] = useState('overview');
 
   const load = useCallback(async () => {
     if (!symbol) return;
@@ -160,52 +172,64 @@ export default function StockDetailScreen() {
           ))}
         </ScrollView>
 
-        <Section title="Events & Calendar">
-          <EventsWidget events={events} currency={ccy} />
-        </Section>
+        <SegmentedTabs options={RESEARCH_TABS} value={tab} onChange={setTab} testID="research-tabs" />
 
-        <Section title="Key Metrics">
-          <MetricGrid items={[
-            { label: 'Market Cap', value: fmtMarketCap(stock.market_cap, ccy) },
-            { label: 'P/E', value: fmtNum(stock.pe) },
-            { label: 'P/B', value: fmtNum(stock.pb) },
-            { label: 'EPS', value: fmtNum(stock.eps) },
-            { label: 'ROE', value: stock.roe != null ? `${stock.roe.toFixed(1)}%` : '—' },
-            { label: 'Debt/Equity', value: fmtNum(stock.debt_to_equity) },
-            { label: 'Div Yield', value: stock.dividend_yield != null ? `${stock.dividend_yield.toFixed(2)}%` : '—' },
-            { label: 'Beta', value: fmtNum(stock.beta) },
-            { label: 'Profit Margin', value: stock.profit_margin != null ? `${stock.profit_margin.toFixed(1)}%` : '—' },
-          ]} />
-        </Section>
+        {tab === 'overview' && (
+          <>
+            <Section title="Events & Calendar">
+              <EventsWidget events={events} currency={ccy} />
+            </Section>
 
-        <Section title="Growth">
-          <MetricGrid items={[
-            { label: 'EPS Growth (Q)', value: stock.eps_growth != null ? `${stock.eps_growth.toFixed(1)}%` : '—', tone: stock.eps_growth && stock.eps_growth > 0 ? 'pos' : 'neg' },
-            { label: 'Revenue Growth', value: stock.revenue_growth != null ? `${stock.revenue_growth.toFixed(1)}%` : '—', tone: stock.revenue_growth && stock.revenue_growth > 0 ? 'pos' : 'neg' },
-            { label: 'Forward P/E', value: fmtNum(stock.forward_pe) },
-          ]} />
-        </Section>
+            <Section title="Key Metrics">
+              <MetricGrid items={[
+                { label: 'Market Cap', value: fmtMarketCap(stock.market_cap, ccy) },
+                { label: 'P/E', value: fmtNum(stock.pe) },
+                { label: 'P/B', value: fmtNum(stock.pb) },
+                { label: 'EPS', value: fmtNum(stock.eps) },
+                { label: 'ROE', value: stock.roe != null ? `${stock.roe.toFixed(1)}%` : '—' },
+                { label: 'Debt/Equity', value: fmtNum(stock.debt_to_equity) },
+                { label: 'Div Yield', value: stock.dividend_yield != null ? `${stock.dividend_yield.toFixed(2)}%` : '—' },
+                { label: 'Beta', value: fmtNum(stock.beta) },
+                { label: 'Profit Margin', value: stock.profit_margin != null ? `${stock.profit_margin.toFixed(1)}%` : '—' },
+              ]} />
+            </Section>
 
-        <Section title="Technicals">
-          <View style={styles.techRow}>
-            <RSIBadge rsi={stock.rsi} />
-            <TechBadge label="50 DMA" value={fmtNum(stock.ma50)} />
-            <TechBadge label="200 DMA" value={fmtNum(stock.ma200)} />
-          </View>
-          <MetricGrid items={[
-            { label: 'MACD', value: fmtNum(stock.macd, 3) },
-            { label: 'Signal', value: fmtNum(stock.macd_signal, 3) },
-            { label: 'Volume Surge', value: stock.volume_surge != null ? `${stock.volume_surge.toFixed(2)}x` : '—', tone: (stock.volume_surge || 0) > 1.2 ? 'pos' : undefined },
-            { label: '52w High', value: fmtPrice(stock.high_52w, ccy) },
-            { label: '52w Low', value: fmtPrice(stock.low_52w, ccy) },
-            { label: 'From 52w High', value: stock.from_52w_high_pct != null ? `${stock.from_52w_high_pct.toFixed(1)}%` : '—' },
-          ]} />
-        </Section>
+            <Section title="Growth">
+              <MetricGrid items={[
+                { label: 'EPS Growth (Q)', value: stock.eps_growth != null ? `${stock.eps_growth.toFixed(1)}%` : '—', tone: stock.eps_growth && stock.eps_growth > 0 ? 'pos' : 'neg' },
+                { label: 'Revenue Growth', value: stock.revenue_growth != null ? `${stock.revenue_growth.toFixed(1)}%` : '—', tone: stock.revenue_growth && stock.revenue_growth > 0 ? 'pos' : 'neg' },
+                { label: 'Forward P/E', value: fmtNum(stock.forward_pe) },
+              ]} />
+            </Section>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Latest News</Text>
-        </View>
-        <NewsList news={news} emptyLabel="No recent headlines for this stock." />
+            <Section title="Technicals">
+              <View style={styles.techRow}>
+                <RSIBadge rsi={stock.rsi} />
+                <TechBadge label="50 DMA" value={fmtNum(stock.ma50)} />
+                <TechBadge label="200 DMA" value={fmtNum(stock.ma200)} />
+              </View>
+              <MetricGrid items={[
+                { label: 'MACD', value: fmtNum(stock.macd, 3) },
+                { label: 'Signal', value: fmtNum(stock.macd_signal, 3) },
+                { label: 'Volume Surge', value: stock.volume_surge != null ? `${stock.volume_surge.toFixed(2)}x` : '—', tone: (stock.volume_surge || 0) > 1.2 ? 'pos' : undefined },
+                { label: '52w High', value: fmtPrice(stock.high_52w, ccy) },
+                { label: '52w Low', value: fmtPrice(stock.low_52w, ccy) },
+                { label: 'From 52w High', value: stock.from_52w_high_pct != null ? `${stock.from_52w_high_pct.toFixed(1)}%` : '—' },
+              ]} />
+            </Section>
+
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Latest News</Text>
+            </View>
+            <NewsList news={news} emptyLabel="No recent headlines for this stock." />
+          </>
+        )}
+
+        {tab === 'quality' && <View style={styles.section}><QualityTab symbol={stock.symbol} /></View>}
+        {tab === 'valuation' && <View style={styles.section}><ValuationTab symbol={stock.symbol} currency={ccy} /></View>}
+        {tab === 'growth' && <View style={styles.section}><GrowthTab symbol={stock.symbol} /></View>}
+        {tab === 'health' && <View style={styles.section}><HealthTab symbol={stock.symbol} /></View>}
+        {tab === 'ai' && <View style={styles.section}><AINoteTab symbol={stock.symbol} /></View>}
       </ScrollView>
     </SafeAreaView>
   );

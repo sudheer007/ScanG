@@ -211,6 +211,52 @@ export interface StockEvents {
   target_mean_price: number | null;
 }
 
+// ---- Fundamentals engine (Track A) ----
+export interface PiotroskiCheck { name: string; passed: boolean | null; detail: string }
+export interface Piotroski { score: number; max: number; evaluated: number; label: 'strong' | 'moderate' | 'weak'; checks: PiotroskiCheck[] }
+export interface Altman { score: number | null; zone: 'safe' | 'grey' | 'distress' | null; components: Record<string, number>; detail: string | null }
+export interface EarningsQuality { accruals_ratio: number | null; cash_conversion: number | null; label: 'high' | 'adequate' | 'low' | null }
+export interface RedFlag { severity: 'high' | 'medium'; title: string; detail: string }
+export interface TrajectoryPoint { date: string; value: number }
+export interface Trajectories {
+  revenue: TrajectoryPoint[]; revenue_growth_pct: TrajectoryPoint[]; gross_margin_pct: TrajectoryPoint[];
+  operating_margin_pct: TrajectoryPoint[]; net_margin_pct: TrajectoryPoint[]; roic_pct: TrajectoryPoint[];
+  debt_to_equity: TrajectoryPoint[]; fcf: TrajectoryPoint[]; shares: TrajectoryPoint[]; interest_coverage: TrajectoryPoint[];
+}
+export interface DcfProjection { year: number; fcf: number; pv: number }
+export interface DcfResult {
+  available: boolean; reason?: string;
+  assumptions?: { base_fcf: number; growth_pct: number; discount_pct: number; terminal_growth_pct: number; years: number };
+  intrinsic_value_per_share?: number; price?: number | null; upside_pct?: number | null;
+  pv_stage_cashflows?: number; pv_terminal_value?: number; terminal_value_share_pct?: number;
+  projections?: DcfProjection[]; verdict?: 'undervalued' | 'overvalued' | 'fairly valued' | null;
+  symbol?: string; default_growth_pct?: number;
+}
+export interface PillarScores { quality: number; health: number; growth: number }
+export interface Fundamentals {
+  symbol: string; available: boolean; name: string; currency: string; price: number | null;
+  market_cap: number | null; as_of: string | null; periods_available: number;
+  pillar_scores: PillarScores; piotroski: Piotroski; altman: Altman; earnings_quality: EarningsQuality;
+  trajectories: Trajectories; red_flags: RedFlag[]; dcf: DcfResult;
+}
+export interface PeerRow {
+  symbol: string; name: string; is_target: boolean; market_cap: number | null;
+  pe: number | null; pb: number | null; ev_ebitda: number | null; revenue_growth: number | null;
+  eps_growth: number | null; roe: number | null; profit_margin: number | null; debt_to_equity: number | null;
+  valuation_score: number | null; growth_score: number | null; quality_score: number | null;
+  composite_score: number | null; rank: number;
+}
+export interface Peers { symbol: string; available: boolean; market: Market; currency: string; sector: string | null; count: number; peers: PeerRow[] }
+export interface ResearchCatalyst { title: string; timeframe: string }
+export interface ResearchNote {
+  rating?: 'strong_buy' | 'buy' | 'hold' | 'sell' | 'strong_sell';
+  confidence?: 'low' | 'medium' | 'high';
+  thesis?: string; bull_case?: string[]; bear_case?: string[]; risks?: string[];
+  catalysts?: ResearchCatalyst[]; valuation_summary?: string;
+  symbol?: string; generated_at?: string; model?: string; as_of_price?: number | null; stale?: boolean;
+  error?: string; detail?: string;
+}
+
 export interface SectorRow {
   sector: string;
   stock_count: number;
@@ -271,4 +317,36 @@ export const api = {
   discoverSectorRotation: (market: Market, force = false) => cget<{ market: Market; currency: string; sectors: SectorRow[] }>(`/discover/sector-rotation?market=${market}`, 120000, force),
   discoverInstitutional: (market: Market, force = false) => cget<any>(`/discover/institutional-activity?market=${market}`, 300000, force),
   analyzer: (symbol: string, force = false) => cget<any>(`/analyzer/${encodeURIComponent(symbol)}`, 300000, force),
+  // ---- Fundamentals engine (Track A) ----
+  fundamentals: (symbol: string, force = false) =>
+    cget<Fundamentals>(`/fundamentals/${encodeURIComponent(symbol)}`, 300000, force),
+  dcf: (symbol: string, opts: { growth?: number; discount?: number; terminalGrowth?: number; years?: number } = {}) => {
+    const qs = new URLSearchParams();
+    if (opts.growth !== undefined) qs.set('growth', String(opts.growth));
+    if (opts.discount !== undefined) qs.set('discount', String(opts.discount));
+    if (opts.terminalGrowth !== undefined) qs.set('terminal_growth', String(opts.terminalGrowth));
+    if (opts.years !== undefined) qs.set('years', String(opts.years));
+    const q = qs.toString();
+    return http<DcfResult>(`/fundamentals/${encodeURIComponent(symbol)}/dcf${q ? `?${q}` : ''}`);
+  },
+  peers: (symbol: string, force = false) =>
+    cget<Peers>(`/fundamentals/${encodeURIComponent(symbol)}/peers`, 600000, force),
+  // ---- AI Research Analyst (Track C) ----
+  research: async (symbol: string, force = false): Promise<ResearchNote> => {
+    try {
+      return await cget<ResearchNote>(`/research/${encodeURIComponent(symbol)}`, 1800000, force);
+    } catch (e: any) {
+      const msg: string = e?.message || '';
+      const match = msg.match(/API (\d+): (.*)/s);
+      if (match) {
+        try {
+          const parsed = JSON.parse(match[2]);
+          return { error: match[1] === '503' ? 'unavailable' : 'error', detail: parsed.detail };
+        } catch {
+          return { error: 'error', detail: msg };
+        }
+      }
+      return { error: 'error', detail: msg };
+    }
+  },
 };
