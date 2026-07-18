@@ -31,7 +31,7 @@ CHART_CACHE = TTLCache(maxsize=4000, ttl=300)                # 5 min charts
 SUMMARY_CACHE = TTLCache(maxsize=4000, ttl=60 * 60)          # 60 min fundamentals
 HISTORY_CACHE = TTLCache(maxsize=2000, ttl=5 * 60)           # 5 min OHLCV history
 BUNDLE_CACHE = TTLCache(maxsize=4000, ttl=120)
-UNIVERSE_BUNDLE_CACHE = TTLCache(maxsize=4, ttl=120)
+UNIVERSE_BUNDLE_CACHE = TTLCache(maxsize=4, ttl=600)         # 10 min — rebuilding costs a full-universe Yahoo fetch (100s of symbols); a short TTL means every backend restart (deploy) forces the next request to eat that cost
 
 _session_lock = threading.Lock()
 _session: Optional[cffi_req.Session] = None
