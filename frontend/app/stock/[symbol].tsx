@@ -12,7 +12,7 @@ import EventsWidget from '@/src/components/EventsWidget';
 import NewsList from '@/src/components/NewsList';
 import { ErrorState, LoadingState } from '@/src/components/States';
 import SegmentedTabs from '@/src/components/widgets/SegmentedTabs';
-import { QualityTab, ValuationTab, GrowthTab, HealthTab, AINoteTab } from '@/src/components/FundamentalsTerminal';
+import { QualityTab, ValuationTab, GrowthTab, HealthTab, OwnershipTab, AINoteTab } from '@/src/components/FundamentalsTerminal';
 
 const RESEARCH_TABS = [
   { value: 'overview', label: 'Overview' },
@@ -20,6 +20,7 @@ const RESEARCH_TABS = [
   { value: 'valuation', label: 'Valuation' },
   { value: 'growth', label: 'Growth' },
   { value: 'health', label: 'Health' },
+  { value: 'ownership', label: 'Ownership' },
   { value: 'ai', label: 'AI Note' },
 ];
 
@@ -229,6 +230,7 @@ export default function StockDetailScreen() {
         {tab === 'valuation' && <View style={styles.section}><ValuationTab symbol={stock.symbol} currency={ccy} /></View>}
         {tab === 'growth' && <View style={styles.section}><GrowthTab symbol={stock.symbol} /></View>}
         {tab === 'health' && <View style={styles.section}><HealthTab symbol={stock.symbol} /></View>}
+        {tab === 'ownership' && <View style={styles.section}><OwnershipTab symbol={stock.symbol} /></View>}
         {tab === 'ai' && <View style={styles.section}><AINoteTab symbol={stock.symbol} /></View>}
       </ScrollView>
     </SafeAreaView>

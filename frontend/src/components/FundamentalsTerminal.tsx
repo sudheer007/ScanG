@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { api, Fundamentals, Peers, PeerRow, DcfResult, ResearchNote, RedFlag } from '@/src/api';
+import { api, Fundamentals, Peers, PeerRow, DcfResult, ResearchNote, RedFlag, Ownership, InsiderTransaction, InstitutionalHolder } from '@/src/api';
 import { theme, fmtNum, fmtMarketCap } from '@/src/theme';
 import ScoreBar from '@/src/components/widgets/ScoreBar';
 import DataTable, { Column } from '@/src/components/widgets/DataTable';
@@ -360,6 +360,127 @@ export function HealthTab({ symbol }: { symbol: string }) {
 }
 
 // ---------------------------------------------------------------------------
+// Ownership tab — SEC EDGAR insider transactions + institutional holders (Track B)
+// ---------------------------------------------------------------------------
+
+const SENTIMENT_COLOR: Record<string, string> = { bullish: theme.colors.success, bearish: theme.colors.error, neutral: theme.colors.textMuted };
+const SENTIMENT_LABEL: Record<string, string> = { bullish: 'Net Buying', bearish: 'Net Selling', neutral: 'Mixed / Neutral' };
+
+function fmtShares(v: number | null): string {
+  if (v == null) return '—';
+  if (v >= 1e6) return `${(v / 1e6).toFixed(2)}M`;
+  if (v >= 1e3) return `${(v / 1e3).toFixed(1)}K`;
+  return v.toFixed(0);
+}
+
+function fmtUsd(v: number | null): string {
+  if (v == null) return '—';
+  if (v >= 1e9) return `$${(v / 1e9).toFixed(2)}B`;
+  if (v >= 1e6) return `$${(v / 1e6).toFixed(2)}M`;
+  if (v >= 1e3) return `$${(v / 1e3).toFixed(1)}K`;
+  return `$${v.toFixed(0)}`;
+}
+
+function InsiderRow({ t }: { t: InsiderTransaction }) {
+  const color = t.sentiment === 'buy' ? theme.colors.success : t.sentiment === 'sell' ? theme.colors.error : theme.colors.textMuted;
+  return (
+    <View style={styles.insiderRow}>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.checkName}>{t.owner_name}</Text>
+        <Text style={styles.checkDetail}>{t.owner_role} · {t.transaction_date}</Text>
+      </View>
+      <View style={{ alignItems: 'flex-end' }}>
+        <Text style={[styles.badgeText, { color }]}>{t.transaction_label}</Text>
+        <Text style={styles.metricLabelSmall}>
+          {fmtShares(t.shares)} sh{t.price != null ? ` @ ${t.price.toFixed(2)}` : ''}{t.value != null ? ` (${fmtUsd(t.value)})` : ''}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+export function OwnershipTab({ symbol }: { symbol: string }) {
+  const [data, setData] = useState<Ownership | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const r = await api.ownership(symbol);
+      setData(r);
+    } catch (e: any) {
+      setError(e?.message || 'Failed to load ownership data');
+    } finally {
+      setLoading(false);
+    }
+  }, [symbol]);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (loading && !data) return <LoadingState label="Pulling SEC filings…" />;
+  if (error) return <ErrorState message={error} onRetry={load} />;
+  if (!data) return <EmptyState title="No ownership data available" />;
+
+  if (!data.available) {
+    return <EmptyState title="Not available for this market" subtitle={data.reason} />;
+  }
+
+  const insider = data.insider;
+  const institutional = data.institutional;
+  const columns: Column[] = [
+    { key: 'organization', label: 'Institution', width: 160 },
+    { key: 'pct_held', label: '% Held', width: 70, align: 'right', render: (r: InstitutionalHolder) => <Text style={styles.tableCell}>{fmtNum(r.pct_held, 2)}</Text> },
+    { key: 'value', label: 'Value', width: 90, align: 'right', render: (r: InstitutionalHolder) => <Text style={styles.tableCell}>{fmtMarketCap(r.value, 'USD')}</Text> },
+    { key: 'pct_change', label: 'Δ %', width: 70, align: 'right', render: (r: InstitutionalHolder) => <Text style={[styles.tableCell, { color: (r.pct_change || 0) >= 0 ? theme.colors.success : theme.colors.error }]}>{fmtNum(r.pct_change, 1)}</Text> },
+  ];
+
+  return (
+    <View>
+      <Card title="Insider Activity (SEC Form 4)">
+        {insider?.available === false ? (
+          <Text style={styles.metricLabel}>{insider.reason || 'No SEC EDGAR record for this symbol.'}</Text>
+        ) : insider ? (
+          <>
+            <View style={styles.insiderSummaryRow}>
+              <View style={[styles.badge, { marginTop: 0, backgroundColor: SENTIMENT_COLOR[insider.summary.net_sentiment] + '22' }]}>
+                <Text style={[styles.badgeText, { color: SENTIMENT_COLOR[insider.summary.net_sentiment] }]}>{SENTIMENT_LABEL[insider.summary.net_sentiment]}</Text>
+              </View>
+              <Text style={styles.metricLabelSmall}>last {insider.summary.window_days} days</Text>
+            </View>
+            <View style={styles.metricRow}>
+              <Text style={styles.metricLabel}>Buys: {insider.summary.buy_count} ({fmtUsd(insider.summary.buy_value)})</Text>
+              <Text style={styles.metricLabel}>Sells: {insider.summary.sell_count} ({fmtUsd(insider.summary.sell_value)})</Text>
+            </View>
+            {insider.transactions.length === 0 ? (
+              <Text style={[styles.metricLabel, { marginTop: 8 }]}>No recent Form 4 filings.</Text>
+            ) : (
+              insider.transactions.slice(0, 20).map((t, i) => <InsiderRow key={`${t.accession}-${i}`} t={t} />)
+            )}
+          </>
+        ) : null}
+      </Card>
+
+      <Card title="Institutional Holders">
+        {institutional && institutional.holders.length > 0 ? (
+          <>
+            <View style={styles.metricRow}>
+              <Text style={styles.metricLabel}>Institutional: {fmtNum(institutional.pct_institutions, 1)}%</Text>
+              <Text style={styles.metricLabel}>Insider: {fmtNum(institutional.pct_insiders, 1)}%</Text>
+            </View>
+            <DataTable columns={columns} rows={institutional.holders} rowKey={(r) => r.organization || ''} testID="institutional-table" />
+            <Text style={styles.dcfNote}>Sourced from Yahoo Finance's aggregated 13F data, not a live per-filing SEC lookup (13F filings are per-institution portfolios, not searchable per-security).</Text>
+          </>
+        ) : (
+          <Text style={styles.metricLabel}>No institutional ownership data available.</Text>
+        )}
+      </Card>
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // AI Note tab — Track C research note
 // ---------------------------------------------------------------------------
 
@@ -513,4 +634,6 @@ const styles = StyleSheet.create({
   catalystRow: { paddingVertical: 6, borderTopWidth: 1, borderTopColor: theme.colors.divider },
   catalystTimeframe: { color: theme.colors.textSubtle, fontSize: 10, fontWeight: '600', marginTop: 2, textTransform: 'uppercase' },
   disclaimer: { color: theme.colors.textSubtle, fontSize: 10, textAlign: 'center', marginTop: 4, marginBottom: theme.spacing.lg, fontStyle: 'italic' },
+  insiderRow: { flexDirection: 'row', gap: 8, paddingVertical: 8, borderTopWidth: 1, borderTopColor: theme.colors.divider, alignItems: 'flex-start' },
+  insiderSummaryRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4 },
 });

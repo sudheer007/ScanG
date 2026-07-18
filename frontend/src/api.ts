@@ -257,6 +257,36 @@ export interface ResearchNote {
   error?: string; detail?: string;
 }
 
+// ---- Insider & institutional ownership (Track B) ----
+export interface InsiderTransaction {
+  owner_name: string;
+  owner_role: string;
+  transaction_date: string;
+  filing_date: string;
+  transaction_code: string | null;
+  transaction_label: string;
+  sentiment: 'buy' | 'sell' | 'neutral';
+  acquired_disposed: string | null;
+  shares: number | null;
+  price: number | null;
+  value: number | null;
+  shares_owned_after: number | null;
+  accession: string;
+}
+export interface InsiderSummary {
+  buy_count: number; sell_count: number; buy_value: number; sell_value: number;
+  net_sentiment: 'bullish' | 'bearish' | 'neutral'; window_days: number;
+}
+export interface InstitutionalHolder {
+  organization: string | null; pct_held: number | null; shares: number | null;
+  value: number | null; pct_change: number | null; report_date: string | null;
+}
+export interface Ownership {
+  symbol: string; available: boolean; reason?: string;
+  insider?: { available: boolean; reason?: string; transactions: InsiderTransaction[]; summary: InsiderSummary };
+  institutional?: { holders: InstitutionalHolder[]; pct_institutions: number | null; pct_insiders: number | null; source: string };
+}
+
 export interface SectorRow {
   sector: string;
   stock_count: number;
@@ -331,6 +361,9 @@ export const api = {
   },
   peers: (symbol: string, force = false) =>
     cget<Peers>(`/fundamentals/${encodeURIComponent(symbol)}/peers`, 600000, force),
+  // ---- Insider & institutional ownership (Track B) ----
+  ownership: (symbol: string, force = false) =>
+    cget<Ownership>(`/ownership/${encodeURIComponent(symbol)}`, 600000, force),
   // ---- AI Research Analyst (Track C) ----
   research: async (symbol: string, force = false): Promise<ResearchNote> => {
     try {
