@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { api, Fundamentals, Peers, PeerRow, DcfResult, ResearchNote, RedFlag, Ownership, InsiderTransaction, InstitutionalHolder } from '@/src/api';
+import { api, Fundamentals, Peers, PeerRow, DcfResult, ResearchNote, RedFlag, Ownership, InsiderTransaction, InstitutionalHolder, RiskProfile } from '@/src/api';
 import { theme, fmtNum, fmtMarketCap } from '@/src/theme';
 import ScoreBar from '@/src/components/widgets/ScoreBar';
 import DataTable, { Column } from '@/src/components/widgets/DataTable';
@@ -476,6 +476,113 @@ export function OwnershipTab({ symbol }: { symbol: string }) {
           <Text style={styles.metricLabel}>No institutional ownership data available.</Text>
         )}
       </Card>
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Risk tab — quant risk metrics vs benchmark
+// ---------------------------------------------------------------------------
+
+const RISK_GRADE_COLOR: Record<string, string> = {
+  Low: theme.colors.success, Moderate: '#34D399', Elevated: theme.colors.warning, High: theme.colors.error,
+};
+
+function RiskMetricRow({ label, value, hint, color }: { label: string; value: string; hint?: string; color?: string }) {
+  return (
+    <View style={styles.trendRow}>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.checkName}>{label}</Text>
+        {hint ? <Text style={styles.checkDetail}>{hint}</Text> : null}
+      </View>
+      <Text style={[styles.metricValue, { fontSize: 16 }, color ? { color } : null]}>{value}</Text>
+    </View>
+  );
+}
+
+export function RiskTab({ symbol }: { symbol: string }) {
+  const [data, setData] = useState<RiskProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const r = await api.riskProfile(symbol);
+      setData(r);
+    } catch (e: any) {
+      setError(e?.message || 'Failed to load risk profile');
+    } finally {
+      setLoading(false);
+    }
+  }, [symbol]);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (loading && !data) return <LoadingState label="Computing risk metrics…" />;
+  if (error) return <ErrorState message={error} onRetry={load} />;
+  if (!data || !data.available) return <EmptyState title="Not enough price history" subtitle="Risk metrics need at least ~30 trading days of data." />;
+
+  const gradeColor = RISK_GRADE_COLOR[data.risk_grade || 'Moderate'];
+  const rs = data.relative_strength || {};
+  const windows = ['1M', '3M', '6M', '1Y'].filter((w) => rs[w]);
+
+  return (
+    <View>
+      <Card title="Risk Grade">
+        <View style={styles.dcfHeadline}>
+          <View style={[styles.badge, { marginTop: 0, backgroundColor: gradeColor + '22' }]}>
+            <Text style={[styles.badgeText, { color: gradeColor, fontSize: 14 }]}>{data.risk_grade} Risk</Text>
+          </View>
+          <Text style={styles.metricLabelSmall}>{data.observations} daily obs · vs {data.benchmark}</Text>
+        </View>
+        <RiskMetricRow label="Annualized volatility" value={`${data.annualized_volatility_pct?.toFixed(1)}%`} hint="Std deviation of daily returns, annualized" />
+        <RiskMetricRow
+          label="Max drawdown (1y)"
+          value={`${data.max_drawdown_pct?.toFixed(1)}%`}
+          hint="Worst peak-to-trough decline"
+          color={(data.max_drawdown_pct || 0) < -30 ? theme.colors.error : undefined}
+        />
+        <RiskMetricRow label="Beta" value={data.beta != null ? data.beta.toFixed(2) : '—'} hint={`Sensitivity to ${data.benchmark} moves`} />
+        <RiskMetricRow label="Correlation" value={data.correlation != null ? data.correlation.toFixed(2) : '—'} hint="Daily return correlation with benchmark" />
+      </Card>
+
+      <Card title="Risk-Adjusted Returns">
+        <RiskMetricRow
+          label="Sharpe ratio"
+          value={data.sharpe != null ? data.sharpe.toFixed(2) : '—'}
+          hint={`Excess return per unit of volatility (rf ${data.risk_free_pct}%)`}
+          color={data.sharpe != null ? (data.sharpe >= 1 ? theme.colors.success : data.sharpe < 0 ? theme.colors.error : undefined) : undefined}
+        />
+        <RiskMetricRow label="Sortino ratio" value={data.sortino != null ? data.sortino.toFixed(2) : '—'} hint="Penalizes only downside volatility" />
+        <RiskMetricRow label="1-day VaR (95%)" value={`${data.var_95_daily_pct?.toFixed(2)}%`} hint="On 1 in 20 days, expect at least this loss" />
+        <RiskMetricRow label="1-day CVaR (95%)" value={`${data.cvar_95_daily_pct?.toFixed(2)}%`} hint="Average loss on those worst 5% of days" />
+        <RiskMetricRow label="Up / down capture" value={`${data.up_capture_pct != null ? data.up_capture_pct.toFixed(0) : '—'} / ${data.down_capture_pct != null ? data.down_capture_pct.toFixed(0) : '—'}%`} hint="Participation in benchmark up-days vs down-days" />
+      </Card>
+
+      {windows.length > 0 && (
+        <Card title={`Relative Strength vs ${data.benchmark}`}>
+          {windows.map((w) => {
+            const r = rs[w];
+            const pos = r.excess_pct >= 0;
+            return (
+              <View key={w} style={styles.trendRow}>
+                <Text style={[styles.checkName, { width: 34 }]}>{w}</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.checkDetail}>
+                    stock {r.stock_pct >= 0 ? '+' : ''}{r.stock_pct.toFixed(1)}% · index {r.benchmark_pct >= 0 ? '+' : ''}{r.benchmark_pct.toFixed(1)}%
+                  </Text>
+                </View>
+                <Text style={[styles.metricValue, { fontSize: 15, color: pos ? theme.colors.success : theme.colors.error }]}>
+                  {pos ? '+' : ''}{r.excess_pct.toFixed(1)}%
+                </Text>
+              </View>
+            );
+          })}
+          <Text style={styles.dcfNote}>Excess return over the benchmark for each trailing window. Persistent positive excess = institutional-style relative strength leadership.</Text>
+        </Card>
+      )}
     </View>
   );
 }

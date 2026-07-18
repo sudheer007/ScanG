@@ -132,6 +132,10 @@ export interface Stock {
   recommendation_key?: string | null;
   analyst_count?: number | null;
   target_mean_price?: number | null;
+  short_pct_float?: number | null;
+  short_ratio?: number | null;
+  shares_short?: number | null;
+  short_interest_change_pct?: number | null;
 }
 
 export interface IndexQuote {
@@ -287,6 +291,56 @@ export interface Ownership {
   institutional?: { holders: InstitutionalHolder[]; pct_institutions: number | null; pct_insiders: number | null; source: string };
 }
 
+// ---- Market intelligence ----
+export interface Breadth {
+  market: Market; currency: string; as_of: string;
+  advancers: number; decliners: number; unchanged: number;
+  adv_decl_ratio: number | null;
+  pct_above_ma50: number | null; pct_above_ma200: number | null;
+  new_52w_highs: number; new_52w_lows: number;
+  avg_rsi: number | null; overbought_count: number; oversold_count: number;
+  up_volume_pct: number | null;
+  components: Record<string, number | null>;
+  composite: number | null;
+  regime: 'Risk-On' | 'Constructive' | 'Neutral' | 'Cautious' | 'Risk-Off' | 'Unknown';
+  regime_detail: string;
+  sample_size: number;
+}
+export interface RelativeStrengthWindow { stock_pct: number; benchmark_pct: number; excess_pct: number }
+export interface RiskProfile {
+  symbol: string; market: Market; benchmark: string; risk_free_pct: number;
+  available: boolean; reason?: string; observations?: number;
+  annualized_return_pct?: number; annualized_volatility_pct?: number;
+  max_drawdown_pct?: number; sharpe?: number | null; sortino?: number | null;
+  var_95_daily_pct?: number; cvar_95_daily_pct?: number;
+  beta?: number | null; correlation?: number | null;
+  up_capture_pct?: number | null; down_capture_pct?: number | null;
+  relative_strength?: Record<string, RelativeStrengthWindow>;
+  risk_grade?: 'Low' | 'Moderate' | 'Elevated' | 'High';
+}
+export interface SqueezeCandidate {
+  symbol: string; name: string; price: number | null; currency: string;
+  change_pct: number | null; sector: string | null; market_cap: number | null;
+  sparkline: number[]; short_pct_float: number; days_to_cover: number | null;
+  short_interest_change_pct: number | null; volume_surge: number | null;
+  rsi: number | null; squeeze_score: number;
+}
+export interface ShortInterestRadar {
+  market: Market; currency: string; available: boolean; coverage: number;
+  squeeze_candidates: SqueezeCandidate[]; most_shorted: SqueezeCandidate[];
+}
+export interface PortfolioInsights {
+  available: boolean; reason?: string; symbols: string[]; count?: number;
+  sector_exposure?: { sector: string; count: number; weight_pct: number }[];
+  diversification?: 'Concentrated' | 'Moderate' | 'Diversified';
+  avg_pairwise_correlation?: number | null;
+  averages?: { beta: number | null; pe: number | null; dividend_yield: number | null; day_change_pct: number | null; ytd_pct: number | null };
+  risk_flags?: { severity: string; title: string; detail: string }[];
+  upcoming_earnings?: { symbol: string; name: string; earnings_date_epoch: number; days_until: number }[];
+  best_today?: { symbol: string; name: string; change_pct: number | null } | null;
+  worst_today?: { symbol: string; name: string; change_pct: number | null } | null;
+}
+
 export interface SectorRow {
   sector: string;
   stock_count: number;
@@ -347,6 +401,12 @@ export const api = {
   discoverSectorRotation: (market: Market, force = false) => cget<{ market: Market; currency: string; sectors: SectorRow[] }>(`/discover/sector-rotation?market=${market}`, 120000, force),
   discoverInstitutional: (market: Market, force = false) => cget<any>(`/discover/institutional-activity?market=${market}`, 300000, force),
   analyzer: (symbol: string, force = false) => cget<any>(`/analyzer/${encodeURIComponent(symbol)}`, 300000, force),
+  // ---- Market intelligence ----
+  marketBreadth: (market: Market, force = false) => cget<Breadth>(`/markets/breadth?market=${market}`, 120000, force, true),
+  riskProfile: (symbol: string, force = false) => cget<RiskProfile>(`/risk/${encodeURIComponent(symbol)}`, 600000, force),
+  discoverShortInterest: (market: Market, force = false) => cget<ShortInterestRadar>(`/discover/short-interest?market=${market}`, 300000, force),
+  portfolioInsights: (symbols: string[], force = false) =>
+    cget<PortfolioInsights>(`/portfolio/insights?symbols=${encodeURIComponent(symbols.join(','))}`, 300000, force),
   // ---- Fundamentals engine (Track A) ----
   fundamentals: (symbol: string, force = false) =>
     cget<Fundamentals>(`/fundamentals/${encodeURIComponent(symbol)}`, 300000, force),

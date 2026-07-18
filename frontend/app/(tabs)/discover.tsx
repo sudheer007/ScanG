@@ -35,8 +35,9 @@ export default function DiscoverScreen() {
         api.discoverEarningsCalendar(m).catch(() => null),
         api.discoverDividendCalendar(m).catch(() => null),
         api.discoverSectorRotation(m).catch(() => null),
-      ]).then(([forecast, earnings, dividend, sector]) => {
-        setExtra({ forecast, earnings, dividend, sector });
+        api.discoverShortInterest(m).catch(() => null),
+      ]).then(([forecast, earnings, dividend, sector, shorts]) => {
+        setExtra({ forecast, earnings, dividend, sector, shorts });
       });
     } catch (e: any) {
       setError(e?.message || 'Failed to load discover feed');
@@ -231,6 +232,34 @@ export default function DiscoverScreen() {
               ))}
               {!extra.sector ? <Text style={styles.loadingTxt}>Computing sector breadth…</Text> : null}
             </WidgetCard>
+
+            {/* Short Squeeze Radar (US only — no NSE short data) */}
+            {extra.shorts?.available ? (
+              <WidgetCard
+                id="short-interest"
+                title="Short Squeeze Radar"
+                subtitle="Heavy short interest meeting upward pressure"
+                icon="flame"
+                accent="#EF4444"
+                rightBadge={{ label: `${extra.shorts.coverage} tracked`, tone: 'neutral' }}
+                testID="widget-short-interest"
+              >
+                {(extra.shorts.squeeze_candidates || []).slice(0, 5).map((s: any) => (
+                  <MiniRow
+                    key={s.symbol}
+                    symbol={s.symbol}
+                    name={`${s.short_pct_float.toFixed(1)}% float short${s.days_to_cover ? ` · ${s.days_to_cover.toFixed(1)}d to cover` : ''}`}
+                    price={s.price}
+                    changePct={s.change_pct}
+                    currency={s.currency}
+                    sparkline={s.sparkline}
+                    rightLabel="Squeeze"
+                    rightValue={`${s.squeeze_score.toFixed(0)}`}
+                    rightTone={s.squeeze_score >= 60 ? 'pos' : 'neutral'}
+                  />
+                ))}
+              </WidgetCard>
+            ) : null}
 
             {/* Market-Moving Events */}
             <WidgetCard

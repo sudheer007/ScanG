@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
-import { api, IndexQuote, Market, Stock, NewsItem, SectorRow } from '@/src/api';
+import { api, Breadth, IndexQuote, Market, Stock, NewsItem, SectorRow } from '@/src/api';
 import { theme, fmtPrice, fmtPct, fmtMarketCap, changeColor } from '@/src/theme';
 import { fmtDayShort, daysUntilLabel } from '@/src/utils/date';
 import { marketPref } from '@/src/storage-keys';
@@ -29,6 +29,7 @@ export default function MarketsScreen() {
   const [losers, setLosers] = useState<Stock[]>([]);
   const [mostActive, setMostActive] = useState<Stock[]>([]);
   const [sectors, setSectors] = useState<SectorRow[]>([]);
+  const [breadthData, setBreadthData] = useState<Breadth | null>(null);
   const [news, setNews] = useState<NewsItem[]>([]);
   const [earnings, setEarnings] = useState<any[]>([]);
   const [dividends, setDividends] = useState<any[]>([]);
@@ -51,6 +52,7 @@ export default function MarketsScreen() {
         const [ov, sec] = await Promise.all([api.marketOverview(m, force), api.discoverSectorRotation(m, force)]);
         setIndices(ov.indices || []); setGainers(ov.gainers || []); setLosers(ov.losers || []);
         setSectors(sec.sectors || []);
+        api.marketBreadth(m, force).then(setBreadthData).catch(() => setBreadthData(null));
       } else if (t === 'movers') {
         const [ov, ma] = await Promise.all([api.marketOverview(m, force), api.discoverMostActive(m, force)]);
         setGainers(ov.gainers || []); setLosers(ov.losers || []); setMostActive(ma.stocks || []);
@@ -148,7 +150,7 @@ export default function MarketsScreen() {
             {tab === 'overview' && (
               <OverviewTab
                 indices={indices} gainers={gainers} losers={losers} sectors={sectors}
-                breadthPct={breadthPct} onStock={goStock} onSeeMore={() => setTab('movers')}
+                breadthPct={breadthPct} breadth={breadthData} onStock={goStock} onSeeMore={() => setTab('movers')}
                 onSectors={() => setTab('sectors')}
               />
             )}
@@ -175,9 +177,54 @@ export default function MarketsScreen() {
 }
 
 // ---------------- Overview ----------------
-function OverviewTab({ indices, gainers, losers, sectors, breadthPct, onStock, onSeeMore, onSectors }: {
+const REGIME_COLOR: Record<string, string> = {
+  'Risk-On': theme.colors.success,
+  'Constructive': '#34D399',
+  'Neutral': theme.colors.warning,
+  'Cautious': '#F97316',
+  'Risk-Off': theme.colors.error,
+  'Unknown': theme.colors.textMuted,
+};
+
+function RegimeCard({ breadth }: { breadth: Breadth }) {
+  const color = REGIME_COLOR[breadth.regime] || theme.colors.textMuted;
+  const pct = breadth.composite ?? 50;
+  const stats: { label: string; value: string }[] = [
+    { label: 'Adv / Decl', value: `${breadth.advancers} / ${breadth.decliners}` },
+    { label: '> 50 DMA', value: breadth.pct_above_ma50 != null ? `${breadth.pct_above_ma50.toFixed(0)}%` : '—' },
+    { label: '> 200 DMA', value: breadth.pct_above_ma200 != null ? `${breadth.pct_above_ma200.toFixed(0)}%` : '—' },
+    { label: 'New Hi / Lo', value: `${breadth.new_52w_highs} / ${breadth.new_52w_lows}` },
+    { label: 'Up Volume', value: breadth.up_volume_pct != null ? `${breadth.up_volume_pct.toFixed(0)}%` : '—' },
+    { label: 'Avg RSI', value: breadth.avg_rsi != null ? breadth.avg_rsi.toFixed(0) : '—' },
+  ];
+  return (
+    <View style={styles.breadthCard} testID="regime-card">
+      <View style={styles.breadthHead}>
+        <Text style={styles.breadthTitle}>Market Regime</Text>
+        <View style={[styles.regimeBadge, { backgroundColor: color + '22' }]}>
+          <Text style={[styles.regimeBadgeText, { color }]}>{breadth.regime}</Text>
+        </View>
+      </View>
+      <View style={styles.breadthBar}>
+        <View style={[styles.breadthFill, { width: `${pct}%`, backgroundColor: color }]} />
+        <View style={[styles.breadthFill, { width: `${100 - pct}%`, backgroundColor: theme.colors.bg3 }]} />
+      </View>
+      <Text style={styles.regimeDetail}>{breadth.regime_detail} Composite {breadth.composite ?? '—'}/100 across {breadth.sample_size} stocks.</Text>
+      <View style={styles.regimeStatsRow}>
+        {stats.map((s) => (
+          <View key={s.label} style={styles.regimeStat}>
+            <Text style={styles.regimeStatLabel}>{s.label}</Text>
+            <Text style={styles.regimeStatValue}>{s.value}</Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function OverviewTab({ indices, gainers, losers, sectors, breadthPct, breadth, onStock, onSeeMore, onSectors }: {
   indices: IndexQuote[]; gainers: Stock[]; losers: Stock[]; sectors: SectorRow[];
-  breadthPct: number; onStock: (s: string) => void; onSeeMore: () => void; onSectors: () => void;
+  breadthPct: number; breadth: Breadth | null; onStock: (s: string) => void; onSeeMore: () => void; onSectors: () => void;
 }) {
   const topSectors = [...sectors].slice(0, 6);
   return (
@@ -195,17 +242,21 @@ function OverviewTab({ indices, gainers, losers, sectors, breadthPct, onStock, o
         ))}
       </ScrollView>
 
-      {/* Breadth bar */}
-      <View style={styles.breadthCard}>
-        <View style={styles.breadthHead}>
-          <Text style={styles.breadthTitle}>Market Breadth</Text>
-          <Text style={styles.breadthPctText}>{breadthPct}% advancing</Text>
+      {/* Regime gauge (falls back to the simple breadth bar until loaded) */}
+      {breadth ? (
+        <RegimeCard breadth={breadth} />
+      ) : (
+        <View style={styles.breadthCard}>
+          <View style={styles.breadthHead}>
+            <Text style={styles.breadthTitle}>Market Breadth</Text>
+            <Text style={styles.breadthPctText}>{breadthPct}% advancing</Text>
+          </View>
+          <View style={styles.breadthBar}>
+            <View style={[styles.breadthFill, { width: `${breadthPct}%`, backgroundColor: theme.colors.success }]} />
+            <View style={[styles.breadthFill, { width: `${100 - breadthPct}%`, backgroundColor: theme.colors.error }]} />
+          </View>
         </View>
-        <View style={styles.breadthBar}>
-          <View style={[styles.breadthFill, { width: `${breadthPct}%`, backgroundColor: theme.colors.success }]} />
-          <View style={[styles.breadthFill, { width: `${100 - breadthPct}%`, backgroundColor: theme.colors.error }]} />
-        </View>
-      </View>
+      )}
 
       {/* Sector heatmap */}
       <SectionHeader title="Sector Heatmap" actionLabel="All sectors" onAction={onSectors} />
@@ -364,6 +415,13 @@ const styles = StyleSheet.create({
   breadthPctText: { color: theme.colors.textMuted, fontSize: 12, fontWeight: '600' },
   breadthBar: { flexDirection: 'row', height: 8, borderRadius: 4, overflow: 'hidden', backgroundColor: theme.colors.bg3 },
   breadthFill: { height: 8 },
+  regimeBadge: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 999 },
+  regimeBadgeText: { fontSize: 12, fontWeight: '800' },
+  regimeDetail: { color: theme.colors.textMuted, fontSize: 11, marginTop: 8, lineHeight: 16 },
+  regimeStatsRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 10, gap: 8 },
+  regimeStat: { flexGrow: 1, flexBasis: '30%', backgroundColor: theme.colors.bg3, borderRadius: theme.radius.sm, paddingVertical: 6, paddingHorizontal: 8 },
+  regimeStatLabel: { color: theme.colors.textSubtle, fontSize: 9, fontWeight: '700', textTransform: 'uppercase' },
+  regimeStatValue: { color: theme.colors.text, fontSize: 13, fontWeight: '700', marginTop: 2, fontVariant: ['tabular-nums'] },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: theme.spacing.lg, marginTop: theme.spacing.lg, marginBottom: theme.spacing.sm },
   sectionTitle: { color: theme.colors.text, fontSize: 16, fontWeight: '700' },
   sectionAction: { color: theme.colors.radar, fontSize: 12, fontWeight: '700' },
