@@ -1,0 +1,18 @@
+name: Prediction ledger — daily capture & resolve
+
+on:
+  schedule:
+    # Once daily, after both US and India markets have closed for the day.
+    - cron: "0 13 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  capture-and-resolve:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Capture today's predictions (US)
+        run: curl -fsS --max-time 120 -X POST "https://scang-api.onrender.com/api/admin/predictions/capture?market=US" > /dev/null
+      - name: Capture today's predictions (India)
+        run: curl -fsS --max-time 120 -X POST "https://scang-api.onrender.com/api/admin/predictions/capture?market=IN" > /dev/null
+      - name: Resolve matured predictions
+        run: curl -fsS --max-time 120 -X POST "https://scang-api.onrender.com/api/admin/predictions/resolve" > /dev/null

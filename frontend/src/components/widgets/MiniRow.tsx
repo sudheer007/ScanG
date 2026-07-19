@@ -16,9 +16,10 @@ interface Props {
   rightTone?: 'pos' | 'neg' | 'neutral';
   onPress?: () => void;
   compact?: boolean;
+  stampText?: string;
 }
 
-export default function MiniRow({ symbol, name, price, changePct, currency, sparkline, rightLabel, rightValue, rightTone, onPress, compact }: Props) {
+export default function MiniRow({ symbol, name, price, changePct, currency, sparkline, rightLabel, rightValue, rightTone, onPress, compact, stampText }: Props) {
   const router = useRouter();
   const short = symbol.replace('.NS', '');
   return (
@@ -30,6 +31,7 @@ export default function MiniRow({ symbol, name, price, changePct, currency, spar
       <View style={styles.left}>
         <Text style={styles.symbol} numberOfLines={1}>{short}</Text>
         {name ? <Text style={styles.name} numberOfLines={1}>{name}</Text> : null}
+        {stampText ? <Text style={styles.stamp} numberOfLines={1}>{stampText}</Text> : null}
       </View>
       {sparkline && sparkline.length > 0 ? (
         <View style={styles.spark}>
@@ -67,6 +69,7 @@ const styles = StyleSheet.create({
   left: { flex: 1 },
   symbol: { color: theme.colors.text, fontSize: 13, fontWeight: '700' },
   name: { color: theme.colors.textMuted, fontSize: 11, marginTop: 1 },
+  stamp: { color: theme.colors.textSubtle, fontSize: 9, fontWeight: '600', marginTop: 2, fontStyle: 'italic' },
   spark: { width: 56 },
   right: { alignItems: 'flex-end', minWidth: 78 },
   price: { color: theme.colors.text, fontSize: 13, fontWeight: '600', fontVariant: ['tabular-nums'] },

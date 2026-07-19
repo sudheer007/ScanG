@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 
-import { api, PortfolioInsights, Stock } from '@/src/api';
+import { api, PortfolioInsights, SinceAdded, TrackRecord, Stock } from '@/src/api';
 import { theme } from '@/src/theme';
 import { fmtDayShort } from '@/src/utils/date';
 import { watchlist, WatchItem } from '@/src/storage-keys';
@@ -16,6 +16,8 @@ export default function WatchlistScreen() {
   const [items, setItems] = useState<WatchItem[]>([]);
   const [quotes, setQuotes] = useState<Stock[]>([]);
   const [insights, setInsights] = useState<PortfolioInsights | null>(null);
+  const [sinceAdded, setSinceAdded] = useState<SinceAdded | null>(null);
+  const [trackRecord, setTrackRecord] = useState<TrackRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -25,6 +27,7 @@ export default function WatchlistScreen() {
     if (list.length === 0) {
       setQuotes([]);
       setInsights(null);
+      setSinceAdded(null);
       setLoading(false);
       setRefreshing(false);
       return;
@@ -35,6 +38,14 @@ export default function WatchlistScreen() {
     } else {
       setInsights(null);
     }
+    const withAddedAt = list.filter((x) => x.addedAt != null);
+    if (withAddedAt.length > 0) {
+      api.sinceAdded(withAddedAt.map((x) => ({ symbol: x.symbol, market: x.market, added_at: x.addedAt! })))
+        .then(setSinceAdded).catch(() => setSinceAdded(null));
+    } else {
+      setSinceAdded(null);
+    }
+    api.trackRecord().then(setTrackRecord).catch(() => setTrackRecord(null));
     try {
       const r = await api.batchQuotes(symbols);
       const ordered: Stock[] = [];
@@ -86,6 +97,8 @@ export default function WatchlistScreen() {
           </View>
         ) : (
           <>
+            {sinceAdded?.available ? <SinceAddedPanel data={sinceAdded} /> : null}
+            {trackRecord ? <TrackRecordPanel data={trackRecord} /> : null}
             {insights?.available ? <InsightsPanel insights={insights} /> : null}
             {quotes.map((s) => (
               <View key={s.symbol} style={{ flexDirection: 'row' }}>
@@ -105,6 +118,63 @@ export default function WatchlistScreen() {
         )}
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+const MATURITY_LABEL: Record<string, string> = {
+  no_data: 'No graded calls yet', building: 'Still building a track record',
+  early: 'Early track record', established: 'Established track record',
+};
+
+function SinceAddedPanel({ data }: { data: SinceAdded }) {
+  const avgColor = (data.avg_return_pct || 0) >= 0 ? theme.colors.success : theme.colors.error;
+  return (
+    <View style={styles.insightsCard} testID="watchlist-since-added">
+      <View style={styles.insightsHead}>
+        <Text style={styles.insightsTitle}>Since You Added These</Text>
+        <Text style={[styles.sinceAddedBig, { color: avgColor }]}>
+          {(data.avg_return_pct || 0) >= 0 ? '+' : ''}{data.avg_return_pct?.toFixed(1)}%
+        </Text>
+      </View>
+      <Text style={styles.insightsMeta}>
+        {data.win_count}/{data.count} positions up{data.avg_alpha_pct != null ? ` · ${data.avg_alpha_pct >= 0 ? '+' : ''}${data.avg_alpha_pct.toFixed(1)}% avg vs benchmark` : ''}
+      </Text>
+      {(data.items || []).slice(0, 5).map((it) => (
+        <View key={it.symbol} style={styles.sinceAddedRow}>
+          <Text style={styles.sinceAddedSym}>{it.symbol.replace('.NS', '')}</Text>
+          <Text style={styles.sinceAddedDays}>{it.added_days_ago}d ago</Text>
+          <Text style={[styles.sinceAddedReturn, { color: it.return_pct >= 0 ? theme.colors.success : theme.colors.error }]}>
+            {it.return_pct >= 0 ? '+' : ''}{it.return_pct.toFixed(1)}%
+          </Text>
+        </View>
+      ))}
+      <Text style={styles.dcfNoteSmall}>This is your own performance since adding each symbol — not the app's prediction, your actual outcome.</Text>
+    </View>
+  );
+}
+
+function TrackRecordPanel({ data }: { data: TrackRecord }) {
+  const o = data.overall;
+  const maturityColor = o.maturity === 'established' ? theme.colors.success : o.maturity === 'early' ? theme.colors.warning : theme.colors.textMuted;
+  return (
+    <View style={styles.insightsCard} testID="watchlist-track-record">
+      <View style={styles.insightsHead}>
+        <Text style={styles.insightsTitle}>App Track Record</Text>
+        <View style={[styles.divBadge, { backgroundColor: maturityColor + '22' }]}>
+          <Text style={[styles.divBadgeText, { color: maturityColor }]}>{MATURITY_LABEL[o.maturity]}</Text>
+        </View>
+      </View>
+      {o.n === 0 ? (
+        <Text style={styles.insightsMeta}>No calls have matured yet — the ledger started tracking today's radar matches, ratings, and forecasts. Check back as they resolve.</Text>
+      ) : (
+        <>
+          <Text style={styles.insightsMeta}>
+            {o.hit_rate_pct}% hit rate · {(o.avg_alpha_pct || 0) >= 0 ? '+' : ''}{o.avg_alpha_pct?.toFixed(1)}% avg alpha vs benchmark · n={o.n}
+          </Text>
+          <Text style={styles.dcfNoteSmall}>Every graded call, wins and losses both — nothing here is cherry-picked or hidden after the fact.</Text>
+        </>
+      )}
+    </View>
   );
 }
 
@@ -208,4 +278,10 @@ const styles = StyleSheet.create({
   flagDetail: { color: theme.colors.textMuted, fontSize: 10, marginTop: 1, lineHeight: 14 },
   earnRow: { flexDirection: 'row', gap: 8, marginTop: 10, alignItems: 'flex-start' },
   earnText: { color: theme.colors.textMuted, fontSize: 11, flex: 1, lineHeight: 15 },
+  sinceAddedBig: { fontSize: 18, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  sinceAddedRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 5, borderTopWidth: 1, borderTopColor: theme.colors.divider, marginTop: 6 },
+  sinceAddedSym: { color: theme.colors.text, fontSize: 12, fontWeight: '700', width: 70 },
+  sinceAddedDays: { color: theme.colors.textSubtle, fontSize: 10, flex: 1 },
+  sinceAddedReturn: { fontSize: 12, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  dcfNoteSmall: { color: theme.colors.textSubtle, fontSize: 10, marginTop: 8, lineHeight: 14, fontStyle: 'italic' },
 });

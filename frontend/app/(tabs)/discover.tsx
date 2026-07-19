@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
-import { api, Market } from '@/src/api';
+import { api, Market, ScorecardBucket } from '@/src/api';
 import { theme, fmtPct, changeColor } from '@/src/theme';
 import { marketPref } from '@/src/storage-keys';
 import ChipRow from '@/src/components/ChipRow';
@@ -13,11 +13,19 @@ import WidgetCard from '@/src/components/widgets/WidgetCard';
 import MiniRow from '@/src/components/widgets/MiniRow';
 import RatingBar from '@/src/components/widgets/RatingBar';
 
+function ratingStamp(bucket?: any): string | undefined {
+  if (!bucket || bucket.n === 0) return undefined;
+  if (bucket.maturity === 'building') return `building track record (n=${bucket.n})`;
+  return `historically ${bucket.hit_rate_pct}% right · n=${bucket.n}`;
+}
+
 export default function DiscoverScreen() {
   const router = useRouter();
   const [market, setMarket] = useState<Market>('US');
   const [data, setData] = useState<any | null>(null);
   const [extra, setExtra] = useState<any>({});
+  const [ratingRecord, setRatingRecord] = useState<Record<string, ScorecardBucket>>({});
+  const [forecastRecord, setForecastRecord] = useState<Record<string, ScorecardBucket>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +47,8 @@ export default function DiscoverScreen() {
       ]).then(([forecast, earnings, dividend, sector, shorts]) => {
         setExtra({ forecast, earnings, dividend, sector, shorts });
       });
+      api.trackRecord({ predType: 'rating' }).then((r) => setRatingRecord(r.by_key || {})).catch(() => {});
+      api.trackRecord({ predType: 'forecast' }).then((r) => setForecastRecord(r.by_key || {})).catch(() => {});
     } catch (e: any) {
       setError(e?.message || 'Failed to load discover feed');
     } finally {
@@ -60,6 +70,9 @@ export default function DiscoverScreen() {
           <Text style={styles.title}>Discover</Text>
           <Text style={styles.subtitle}>Insights, picks & events across {data?.universe_size || '—'} stocks</Text>
         </View>
+        <TouchableOpacity testID="open-watchlist" onPress={() => router.push('/(tabs)/watchlist')} style={[styles.iconBtn, { marginRight: 8 }]}>
+          <Ionicons name="bookmark-outline" size={19} color={theme.colors.text} />
+        </TouchableOpacity>
         <TouchableOpacity testID="open-search" onPress={() => router.push('/search')} style={styles.iconBtn}>
           <Ionicons name="search" size={20} color={theme.colors.text} />
         </TouchableOpacity>
@@ -107,6 +120,7 @@ export default function DiscoverScreen() {
                   rightLabel={s.ai_rating?.replace('_', ' ')}
                   rightValue={`${s.ai_score}`}
                   rightTone={s.ai_score >= 62 ? 'pos' : s.ai_score >= 48 ? 'neutral' : 'neg'}
+                  stampText={ratingStamp(ratingRecord[s.ai_rating])}
                 />
               ))}
             </WidgetCard>
@@ -121,6 +135,12 @@ export default function DiscoverScreen() {
               rightBadge={{ label: 'EARLY BETS', tone: 'pos' }}
               testID="widget-forecast"
             >
+              <Text style={styles.forecastStampRow}>
+                {(['1M', '3M', '6M', '1Y'] as const).map((h) => {
+                  const b = forecastRecord[h];
+                  return `${h} ${b && b.n > 0 ? `${b.hit_rate_pct}%(n${b.n})` : 'building'}`;
+                }).join('  ·  ')}
+              </Text>
               {(extra.forecast?.top || []).slice(0, 4).map((s: any) => (
                 <View key={s.symbol} style={styles.forecastRow}>
                   <View style={{ flex: 1 }}>
@@ -501,6 +521,7 @@ const styles = StyleSheet.create({
   invCount: { color: theme.colors.text, fontSize: 14, fontWeight: '800', fontVariant: ['tabular-nums'] },
   // ---- New widget styles ----
   loadingTxt: { color: theme.colors.textSubtle, fontSize: 11, paddingVertical: 12, textAlign: 'center', fontStyle: 'italic' },
+  forecastStampRow: { color: theme.colors.textSubtle, fontSize: 9, fontWeight: '600', fontStyle: 'italic', marginBottom: 6 },
   forecastRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, gap: 8 },
   forecastSym: { color: theme.colors.text, fontSize: 13, fontWeight: '800' },
   forecastName: { color: theme.colors.textMuted, fontSize: 10, marginTop: 1 },

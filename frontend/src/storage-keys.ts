@@ -4,7 +4,7 @@ const WATCHLIST_KEY = 'radar.watchlist.v1';
 const SAVED_SCREENS_KEY = 'radar.screens.v1';
 const MARKET_KEY = 'radar.market.v1';
 
-export type WatchItem = { symbol: string; market: 'US' | 'IN'; name?: string };
+export type WatchItem = { symbol: string; market: 'US' | 'IN'; name?: string; addedAt?: number };
 
 export const watchlist = {
   async list(): Promise<WatchItem[]> {
@@ -15,7 +15,7 @@ export const watchlist = {
   async add(item: WatchItem) {
     const list = await this.list();
     if (!list.find((x) => x.symbol === item.symbol)) {
-      list.push(item);
+      list.push({ ...item, addedAt: item.addedAt ?? Math.floor(Date.now() / 1000) });
       await storage.setItem(WATCHLIST_KEY, JSON.stringify(list));
     }
     return list;

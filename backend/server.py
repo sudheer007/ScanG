@@ -18,6 +18,7 @@ import fundamentals_service as fs
 import research_service as rs
 import insider_service as ins
 import market_intel_service as mi
+import predictions_service as ps
 from stock_universe import get_universe, currency
 
 ROOT_DIR = Path(__file__).parent
@@ -390,6 +391,55 @@ async def portfolio_insights(symbols: str = Query(..., description="Comma-separa
     if not syms:
         raise HTTPException(status_code=400, detail="No symbols provided")
     return await mi.portfolio_insights(syms)
+
+
+# ---------- Prediction ledger / accountability ----------
+@api_router.get("/track-record")
+async def track_record(
+    market: Optional[str] = Query(None),
+    pred_type: Optional[str] = Query(None, description="rating | forecast | radar"),
+    key: Optional[str] = Query(None, description="e.g. STRONG_BUY, 1M, momentum_breakouts"),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """Graded track record of every past call the app has made, benchmark-relative.
+
+    No filters = global scorecard with a per-key breakdown. Filter by
+    pred_type/key to stamp a specific strategy/rating/horizon card.
+    """
+    return await ps.get_track_record(db, market, pred_type, key, limit)
+
+
+class SinceAddedItem(BaseModel):
+    symbol: str
+    market: str = "US"
+    added_at: float  # epoch seconds
+
+
+class SinceAddedRequest(BaseModel):
+    items: List[SinceAddedItem]
+
+
+@api_router.post("/portfolio/since-added")
+async def portfolio_since_added(req: SinceAddedRequest):
+    """Personal accountability: how each watchlist symbol has performed since the user added it, vs benchmark.
+
+    Takes the client's own on-device watchlist (symbol + add timestamp) —
+    the watchlist has no server-side source of truth to read from.
+    """
+    items = [i.dict() for i in req.items]
+    return await ps.since_added_performance(items)
+
+
+@api_router.post("/admin/predictions/capture")
+async def admin_capture_predictions(market: str = Query("US")):
+    """Daily snapshot job — called by the scheduled GitHub Action, not the app."""
+    return await ps.capture_daily_snapshot(db, market)
+
+
+@api_router.post("/admin/predictions/resolve")
+async def admin_resolve_predictions():
+    """Grades every prediction whose horizon has elapsed. Called by the scheduled GitHub Action."""
+    return await ps.resolve_due(db)
 
 
 

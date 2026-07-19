@@ -3,8 +3,9 @@ import { View, Text, ScrollView, StyleSheet, TouchableOpacity, RefreshControl } 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter } from 'expo-router';
 
-import { api, Market, RadarResult, Stock, Strategy } from '@/src/api';
+import { api, Market, RadarResult, ScorecardBucket, Stock, Strategy } from '@/src/api';
 import { theme } from '@/src/theme';
 import { marketPref } from '@/src/storage-keys';
 import ChipRow from '@/src/components/ChipRow';
@@ -53,8 +54,10 @@ const upsidePct = (r: Stock) =>
   r.target_mean_price && r.price ? ((r.target_mean_price - r.price) / r.price) * 100 : null;
 
 export default function RadarScreen() {
+  const router = useRouter();
   const [market, setMarket] = useState<Market>('US');
   const [strategies, setStrategies] = useState<Strategy[]>([]);
+  const [byKeyRecord, setByKeyRecord] = useState<Record<string, ScorecardBucket>>({});
   const [active, setActive] = useState<string | null>(null);
   const [result, setResult] = useState<RadarResult | null>(null);
   const [loading, setLoading] = useState(true);
@@ -68,6 +71,7 @@ export default function RadarScreen() {
     api.strategies()
       .then((d) => { setStrategies(d.strategies); setLoading(false); })
       .catch((e) => { setError(e.message); setLoading(false); });
+    api.trackRecord({ predType: 'radar' }).then((r) => setByKeyRecord(r.by_key || {})).catch(() => {});
   }, []);
 
   const runStrategy = useCallback(async (key: string, m: Market) => {
@@ -156,10 +160,13 @@ export default function RadarScreen() {
           </Text>
         </View>
         {active && (
-          <TouchableOpacity onPress={onRefresh} style={styles.iconBtn} testID="radar-refresh">
+          <TouchableOpacity onPress={onRefresh} style={[styles.iconBtn, { marginRight: 8 }]} testID="radar-refresh">
             <Ionicons name="refresh" size={19} color={theme.colors.text} />
           </TouchableOpacity>
         )}
+        <TouchableOpacity testID="open-watchlist" onPress={() => router.push('/(tabs)/watchlist')} style={styles.iconBtn}>
+          <Ionicons name="bookmark-outline" size={19} color={theme.colors.text} />
+        </TouchableOpacity>
       </View>
 
       <ChipRow
@@ -206,6 +213,7 @@ export default function RadarScreen() {
                     </View>
                     <Text style={styles.cardTitle}>{s.title}</Text>
                     <Text style={styles.cardSubtitle} numberOfLines={2}>{s.subtitle}</Text>
+                    <TrackStamp bucket={byKeyRecord[s.key]} />
                     <View style={styles.cardFooter}>
                       <Text style={styles.cardCta}>Run scan</Text>
                       <Ionicons name="chevron-forward" size={14} color={theme.colors.textMuted} />
@@ -246,6 +254,21 @@ export default function RadarScreen() {
   );
 }
 
+export function TrackStamp({ bucket }: { bucket?: ScorecardBucket }) {
+  if (!bucket || bucket.n === 0) {
+    return <Text style={styles.stampBuilding}>No graded calls yet</Text>;
+  }
+  if (bucket.maturity === 'building') {
+    return <Text style={styles.stampBuilding}>Building track record (n={bucket.n})</Text>;
+  }
+  const good = (bucket.hit_rate_pct || 0) >= 50;
+  return (
+    <Text style={[styles.stamp, { color: good ? theme.colors.success : theme.colors.error }]}>
+      {bucket.hit_rate_pct}% hit rate · {(bucket.avg_alpha_pct || 0) >= 0 ? '+' : ''}{bucket.avg_alpha_pct?.toFixed(1)}% avg alpha · n={bucket.n}
+    </Text>
+  );
+}
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: theme.colors.bg },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: theme.spacing.lg, paddingTop: theme.spacing.sm, paddingBottom: theme.spacing.sm, gap: 10 },
@@ -275,6 +298,8 @@ const styles = StyleSheet.create({
   cardTitle: { color: theme.colors.text, fontSize: 14, fontWeight: '700', marginBottom: 4 },
   cardSubtitle: { color: theme.colors.textMuted, fontSize: 11, lineHeight: 15 },
   cardFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: theme.spacing.md },
+  stamp: { fontSize: 9, fontWeight: '700', marginTop: 6, fontVariant: ['tabular-nums'] },
+  stampBuilding: { fontSize: 9, fontWeight: '600', marginTop: 6, color: theme.colors.textSubtle, fontStyle: 'italic' },
   cardCta: { color: theme.colors.text, fontSize: 11, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
   strategyDescription: {
     color: theme.colors.textMuted,
