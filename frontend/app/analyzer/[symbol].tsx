@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
-import { api } from '@/src/api';
+import { api, ScorecardBucket } from '@/src/api';
 import { theme, fmtPrice, fmtPct, fmtMarketCap, changeColor, fmtNum } from '@/src/theme';
 import { LoadingState, ErrorState } from '@/src/components/States';
 import ScoreBar from '@/src/components/widgets/ScoreBar';
@@ -15,6 +15,7 @@ export default function AnalyzerScreen() {
   const { symbol } = useLocalSearchParams<{ symbol: string }>();
   const sym = String(symbol || '');
   const [data, setData] = useState<any>(null);
+  const [ratingRecord, setRatingRecord] = useState<ScorecardBucket | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,7 +25,13 @@ export default function AnalyzerScreen() {
       setError(null);
       const r = await api.analyzer(sym);
       if (r?.error) { setError('No analyzer data available for ' + sym); setData(null); }
-      else setData(r);
+      else {
+        setData(r);
+        const rating = r?.verdict?.rating;
+        if (rating) {
+          api.trackRecord({ predType: 'rating', key: rating }).then((tr) => setRatingRecord(tr.overall)).catch(() => {});
+        }
+      }
     } catch (e: any) { setError(e?.message || 'Failed to load'); }
     finally { setLoading(false); setRefreshing(false); }
   }, [sym]);
@@ -79,6 +86,7 @@ export default function AnalyzerScreen() {
             <Text style={[styles.ratingBigText, { color: verdictTextColor(v.rating) }]}>{(v.rating || '').replace('_', ' ')}</Text>
             <Text style={styles.confText}>· {v.confidence} confidence</Text>
           </View>
+          <Text style={styles.calibrationStamp}>{calibrationText(ratingRecord)}</Text>
           <Text style={styles.summary}>{v.summary}</Text>
         </View>
 
@@ -381,6 +389,12 @@ function verdictBorderColor(r?: string) {
   if (r === 'HOLD') return { borderColor: 'rgba(245,158,11,0.4)' };
   return { borderColor: 'rgba(239,68,68,0.4)' };
 }
+function calibrationText(bucket?: { n: number; hit_rate_pct: number | null; avg_alpha_pct: number | null; maturity: string }): string {
+  if (!bucket || bucket.n === 0) return 'No graded calls of this rating yet — track record is still building.';
+  if (bucket.maturity === 'building') return `Too early to trust this rating's track record yet (n=${bucket.n}).`;
+  const alpha = bucket.avg_alpha_pct ?? 0;
+  return `This rating has historically been right ${bucket.hit_rate_pct}% of the time, ${alpha >= 0 ? '+' : ''}${alpha.toFixed(1)}% avg alpha vs benchmark (n=${bucket.n}).`;
+}
 
 function Header({ onBack, title, subtitle }: { onBack: () => void; title: string; subtitle: string }) {
   return (
@@ -454,6 +468,7 @@ const styles = StyleSheet.create({
   ratingBigText: { fontSize: 13, fontWeight: '900', letterSpacing: 0.5 },
   confText: { color: theme.colors.textSubtle, fontSize: 11 },
   summary: { color: theme.colors.text, fontSize: 13, lineHeight: 19, marginTop: 12 },
+  calibrationStamp: { color: theme.colors.textSubtle, fontSize: 10, fontStyle: 'italic', marginTop: 8, lineHeight: 14 },
 
   section: { marginHorizontal: theme.spacing.lg, marginBottom: 14 },
   sectionHead: { marginBottom: 8 },

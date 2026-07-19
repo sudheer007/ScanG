@@ -108,6 +108,9 @@ export default function MarketsScreen() {
           <Text style={styles.title}>Markets</Text>
           <Text style={styles.subtitle}>Live • {market === 'US' ? 'United States' : 'India'}</Text>
         </View>
+        <TouchableOpacity testID="open-watchlist" onPress={() => router.push('/(tabs)/watchlist')} style={[styles.iconBtn, { marginRight: 8 }]}>
+          <Ionicons name="bookmark-outline" size={19} color={theme.colors.text} />
+        </TouchableOpacity>
         <TouchableOpacity testID="open-search" onPress={() => router.push('/search')} style={styles.iconBtn}>
           <Ionicons name="search" size={20} color={theme.colors.text} />
         </TouchableOpacity>

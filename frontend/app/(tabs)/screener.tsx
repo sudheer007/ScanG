@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 
 import { api, Market, Stock } from '@/src/api';
 import { theme } from '@/src/theme';
@@ -19,6 +20,7 @@ type Mode = 'quick' | 'custom';
 const BASE_COLS = ['price', 'change_pct', 'market_cap', 'pe', 'roe'];
 
 export default function ScreenerScreen() {
+  const router = useRouter();
   const [market, setMarket] = useState<Market>('US');
   const [mode, setMode] = useState<Mode>('quick');
   const [filters, setFilters] = useState<ActiveFilters>({});
@@ -107,6 +109,9 @@ export default function ScreenerScreen() {
             {hasFilters ? `${results.length} matches` : `${universe.length} stocks`} • {market} • {AVAILABLE_COUNT}+ metrics
           </Text>
         </View>
+        <TouchableOpacity testID="open-watchlist" onPress={() => router.push('/(tabs)/watchlist')} style={[styles.iconBtn, { marginRight: 8 }]}>
+          <Ionicons name="bookmark-outline" size={19} color={theme.colors.text} />
+        </TouchableOpacity>
         <TouchableOpacity testID="open-filters" onPress={() => setSheetOpen(true)} style={styles.iconBtn}>
           <Ionicons name="options" size={20} color={theme.colors.text} />
           {hasFilters && <View style={styles.dot} />}

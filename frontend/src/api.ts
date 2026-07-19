@@ -341,6 +341,33 @@ export interface PortfolioInsights {
   worst_today?: { symbol: string; name: string; change_pct: number | null } | null;
 }
 
+// ---- Prediction ledger / accountability ----
+export interface ScorecardBucket {
+  n: number; hit_rate_pct: number | null; avg_alpha_pct: number | null;
+  avg_predicted_return_pct: number | null; avg_actual_return_pct: number | null;
+  maturity: 'no_data' | 'building' | 'early' | 'established';
+}
+export interface TrackRecordEntry {
+  symbol: string; market: string; pred_type: string; key: string;
+  predicted_at: string; resolved_at: string | null; actual_return_pct: number | null;
+  benchmark_return_pct: number | null; alpha_pct: number | null; outcome: 'hit' | 'miss' | null;
+}
+export interface TrackRecord {
+  overall: ScorecardBucket;
+  by_key?: Record<string, ScorecardBucket>;
+  recent: TrackRecordEntry[];
+  filters: { market: string | null; pred_type: string | null; key: string | null };
+}
+export interface SinceAddedItem {
+  symbol: string; name: string; added_days_ago: number; price_at_add: number; price_now: number;
+  return_pct: number; benchmark_return_pct: number | null; alpha_pct: number | null;
+}
+export interface SinceAdded {
+  available: boolean; reason?: string; count?: number;
+  avg_return_pct?: number; avg_alpha_pct?: number | null; win_count?: number;
+  items: SinceAddedItem[];
+}
+
 export interface SectorRow {
   sector: string;
   stock_count: number;
@@ -407,6 +434,17 @@ export const api = {
   discoverShortInterest: (market: Market, force = false) => cget<ShortInterestRadar>(`/discover/short-interest?market=${market}`, 300000, force),
   portfolioInsights: (symbols: string[], force = false) =>
     cget<PortfolioInsights>(`/portfolio/insights?symbols=${encodeURIComponent(symbols.join(','))}`, 300000, force),
+  // ---- Prediction ledger / accountability ----
+  trackRecord: (opts: { market?: Market; predType?: string; key?: string } = {}, force = false) => {
+    const qs = new URLSearchParams();
+    if (opts.market) qs.set('market', opts.market);
+    if (opts.predType) qs.set('pred_type', opts.predType);
+    if (opts.key) qs.set('key', opts.key);
+    const q = qs.toString();
+    return cget<TrackRecord>(`/track-record${q ? `?${q}` : ''}`, 1800000, force);
+  },
+  sinceAdded: (items: { symbol: string; market: string; added_at: number }[]) =>
+    http<SinceAdded>(`/portfolio/since-added`, { method: 'POST', body: JSON.stringify({ items }) }),
   // ---- Fundamentals engine (Track A) ----
   fundamentals: (symbol: string, force = false) =>
     cget<Fundamentals>(`/fundamentals/${encodeURIComponent(symbol)}`, 300000, force),
