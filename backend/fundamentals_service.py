@@ -223,9 +223,9 @@ def compute_piotroski(annual: Series) -> Dict[str, Any]:
     add("Gross margin improving", ok if (gm is not None and gm_prev is not None) else None,
         f"{gm_prev * 100:.1f}% → {gm * 100:.1f}%" if (gm is not None and gm_prev is not None) else "insufficient data")
 
-    # 9. Asset turnover improving
-    at = _ratio(rev, ta)
-    at_prev = _ratio(rev_prev, ta_prev if ta_prev is not None else ta_prev2)
+    # 9. Asset turnover improving (Piotroski scales by beginning-of-year assets)
+    at = _ratio(rev, ta_prev if ta_prev is not None else ta)
+    at_prev = _ratio(rev_prev, ta_prev2 if ta_prev2 is not None else ta_prev)
     ok = at is not None and at_prev is not None and at > at_prev
     add("Asset turnover improving", ok if (at is not None and at_prev is not None) else None,
         f"{at_prev:.2f} → {at:.2f}" if (at is not None and at_prev is not None) else "insufficient data")
@@ -622,10 +622,13 @@ def _percentile_rank(values: List[float], v: float, lower_is_better: bool = Fals
     vals = [x for x in values if x is not None]
     if not vals or v is None:
         return 50.0
-    below = sum(1 for x in vals if x < v)
-    equal = sum(1 for x in vals if x == v)
-    pct = (below + equal * 0.5) / len(vals) * 100
-    return round(100 - pct if lower_is_better else pct, 0)
+    # Inclusive rank: share of the peer set matched or beaten in the
+    # favorable direction, so the best value scores 100.
+    if lower_is_better:
+        favorable = sum(1 for x in vals if x >= v)
+    else:
+        favorable = sum(1 for x in vals if x <= v)
+    return round(favorable / len(vals) * 100, 0)
 
 
 def build_peer_table(target: Dict[str, Any], candidates: List[Dict[str, Any]], max_peers: int = 7) -> Dict[str, Any]:

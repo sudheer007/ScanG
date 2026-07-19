@@ -27,6 +27,8 @@ Deployment quirks learned the hard way:
 
 Working prototype: markets overview (indices/movers/sectors/news/calendar), radar strategies, custom screener, discover feed, per-stock analyzer (rating/score/pros/cons), watchlist + saved screens (client-generated anonymous user_id, no auth).
 
+Market intelligence layer (`backend/market_intel_service.py`): breadth/regime gauge (`/api/markets/breadth`, regime card on Markets overview), per-stock quant risk profile (`/api/risk/{symbol}`, Risk tab in the research terminal — vol/drawdown/Sharpe/VaR/beta/relative strength vs ^GSPC or ^NSEI), short-interest squeeze radar (`/api/discover/short-interest`, US-only Discover widget), and watchlist portfolio insights (`/api/portfolio/insights?symbols=`, panel on Watchlist tab). Pure compute functions unit-tested in `backend/tests/test_market_intel.py`.
+
 ## Agreed roadmap — "institutional-grade" upgrade (user-approved direction)
 
 Planned tracks (user picked A + C to start; work on branch `feature/institutional`, NOT main):

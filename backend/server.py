@@ -17,6 +17,7 @@ import news_service as news
 import fundamentals_service as fs
 import research_service as rs
 import insider_service as ins
+import market_intel_service as mi
 from stock_universe import get_universe, currency
 
 ROOT_DIR = Path(__file__).parent
@@ -358,6 +359,37 @@ async def research_note(symbol: str, force: bool = Query(False)):
 async def ownership(symbol: str):
     """Real SEC EDGAR Form 4 insider transactions + Yahoo-aggregated institutional holders. US stocks only."""
     return await ins.get_ownership(symbol)
+
+
+# ---------- Market Intelligence ----------
+@api_router.get("/markets/breadth")
+async def markets_breadth(market: str = Query("US")):
+    """Universe-wide breadth internals + composite regime gauge."""
+    return await mi.market_breadth(market)
+
+
+@api_router.get("/risk/{symbol}")
+async def risk_profile(symbol: str):
+    """Quant risk profile: volatility, drawdown, Sharpe/Sortino, VaR, beta & relative strength vs benchmark."""
+    result = await mi.risk_profile(symbol)
+    if not result.get("available"):
+        raise HTTPException(status_code=404, detail=result.get("reason", f"Not enough history for {symbol}"))
+    return result
+
+
+@api_router.get("/discover/short-interest")
+async def discover_short_interest(market: str = Query("US"), limit: int = Query(25, ge=1, le=80)):
+    """Short interest & squeeze radar (US only — Yahoo has no NSE short data)."""
+    return await mi.short_interest_radar(market, limit)
+
+
+@api_router.get("/portfolio/insights")
+async def portfolio_insights(symbols: str = Query(..., description="Comma-separated symbols")):
+    """Basket-level intelligence for a watchlist: exposure, correlation, risk flags, catalysts."""
+    syms = [s for s in symbols.split(",") if s.strip()]
+    if not syms:
+        raise HTTPException(status_code=400, detail="No symbols provided")
+    return await mi.portfolio_insights(syms)
 
 
 

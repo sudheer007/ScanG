@@ -439,6 +439,11 @@ def _fetch_summary_layer(symbol: str) -> Dict[str, Any]:
         "float_shares": _safe(ks.get("floatShares")),
         "shares_outstanding": _safe(ks.get("sharesOutstanding")),
         "payout_ratio": (_safe(sd.get("payoutRatio")) * 100) if _safe(sd.get("payoutRatio")) is not None else None,
+        # --- Short interest (US only; Yahoo has no NSE short data) ---
+        "short_pct_float": (_safe(ks.get("shortPercentOfFloat")) * 100) if _safe(ks.get("shortPercentOfFloat")) is not None else None,
+        "short_ratio": _safe(ks.get("shortRatio")),
+        "shares_short": _safe(ks.get("sharesShort")),
+        "shares_short_prior_month": _safe(ks.get("sharesShortPriorMonth")),
         # --- REAL analyst data ---
         "target_mean_price": _safe(fd.get("targetMeanPrice")),
         "target_high_price": _safe(fd.get("targetHighPrice")),
@@ -522,6 +527,10 @@ def _merge_bundle(symbol: str, quote: Dict[str, Any], chart_layer: Dict[str, Any
         "ev_sales": summary_layer.get("ev_sales"),
         "book_value_per_share": summary_layer.get("book_value_per_share"),
         "payout_ratio": summary_layer.get("payout_ratio"),
+        # --- Short interest ---
+        "short_pct_float": summary_layer.get("short_pct_float"),
+        "short_ratio": summary_layer.get("short_ratio"),
+        "shares_short": summary_layer.get("shares_short"),
         # --- Computed technicals (from chart) ---
         "from_52w_low_pct": chart_layer.get("from_52w_low_pct"),
         "atr": chart_layer.get("atr"),
@@ -570,6 +579,11 @@ def _merge_bundle(symbol: str, quote: Dict[str, Any], chart_layer: Dict[str, Any
     bundle["rvol"] = round(vol / avg_vol, 2) if (vol and avg_vol and avg_vol > 0) else None
     mcap = bundle.get("market_cap"); fcf = bundle.get("free_cashflow")
     bundle["p_fcf"] = round(mcap / fcf, 2) if (mcap and fcf and fcf > 0) else None
+    shorts = bundle.get("shares_short"); shorts_prior = summary_layer.get("shares_short_prior_month")
+    bundle["short_interest_change_pct"] = (
+        round((shorts - shorts_prior) / shorts_prior * 100, 1)
+        if (shorts is not None and shorts_prior and shorts_prior > 0) else None
+    )
     return bundle
 
 
