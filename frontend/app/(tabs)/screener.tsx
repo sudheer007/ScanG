@@ -197,7 +197,7 @@ export default function ScreenerScreen() {
           ) : results.length === 0 ? (
             <EmptyState title="No matches" subtitle="Try loosening your filters." />
           ) : (
-            <View style={{ flex: 1, paddingHorizontal: theme.spacing.sm }}>
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: theme.spacing.sm, paddingBottom: 120 }}>
               <SortableDataTable
                 testID="screener-table"
                 columns={columns}
@@ -206,7 +206,7 @@ export default function ScreenerScreen() {
                 stickyField="symbol"
                 stickyWidth={90}
               />
-            </View>
+            </ScrollView>
           )}
         </View>
       )}

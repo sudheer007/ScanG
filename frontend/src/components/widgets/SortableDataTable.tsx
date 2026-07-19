@@ -137,71 +137,73 @@ export default function SortableDataTable({
         </ScrollView>
       </View>
 
-      {/* ===== Body: vertical scroll wraps both sticky col + horizontal-scroll data ===== */}
-      <ScrollView style={{ maxHeight: 800 }} nestedScrollEnabled>
-        <View style={{ flexDirection: 'row' }}>
-          {/* Sticky column body */}
-          <View style={[styles.stickyBodyCol, { width: stickyWidth }]}>
+      {/* ===== Body: sticky col + horizontal-scroll data. No nested vertical
+          ScrollView here — the page around this table owns vertical scrolling.
+          A vertical scroll region nested inside another one is what caused
+          phantom blank space below short tables on web, and fights the
+          outer scroll gesture on Android. ===== */}
+      <View style={{ flexDirection: 'row' }}>
+        {/* Sticky column body */}
+        <View style={[styles.stickyBodyCol, { width: stickyWidth }]}>
+          {sortedRows.map((r, idx) => (
+            <TouchableOpacity
+              key={(rowKey ? rowKey(r) : idx.toString()) + '-sticky'}
+              activeOpacity={0.7}
+              onPress={() => handlePressRow(r)}
+              style={[styles.stickyCell, idx % 2 === 1 && { backgroundColor: theme.colors.bg2 }]}
+            >
+              {(renderSticky || defaultStickyRender)(r)}
+            </TouchableOpacity>
+          ))}
+        </View>
+        {/* Horizontally scrollable body — synced with header */}
+        <ScrollView
+          ref={bodyScrollRef}
+          horizontal
+          showsHorizontalScrollIndicator
+          scrollEventThrottle={16}
+          onScroll={onBodyHorizScroll}
+          style={{ flex: 1 }}
+        >
+          <View style={{ width: Math.max(totalScrollW, 320) }}>
             {sortedRows.map((r, idx) => (
               <TouchableOpacity
-                key={(rowKey ? rowKey(r) : idx.toString()) + '-sticky'}
+                key={rowKey ? rowKey(r) : idx.toString()}
+                testID={`row-${r[stickyField]}`}
                 activeOpacity={0.7}
                 onPress={() => handlePressRow(r)}
-                style={[styles.stickyCell, idx % 2 === 1 && { backgroundColor: theme.colors.bg2 }]}
+                style={[styles.bodyRow, idx % 2 === 1 && { backgroundColor: theme.colors.bg2 }]}
               >
-                {(renderSticky || defaultStickyRender)(r)}
+                {columns.map((c) => {
+                  const tone = c.tone ? c.tone(r) : undefined;
+                  const color =
+                    tone === 'pos' ? theme.colors.success :
+                    tone === 'neg' ? theme.colors.error :
+                    theme.colors.text;
+                  const rendered = c.render ? c.render(r) : (r[c.key] ?? '—');
+                  const isPrimitive = typeof rendered === 'string' || typeof rendered === 'number';
+                  return (
+                    <View key={c.key} style={[styles.bodyCell, { width: c.width || 100 }]}>
+                      {isPrimitive ? (
+                        <Text
+                          numberOfLines={1}
+                          style={[
+                            styles.cell,
+                            { textAlign: c.align || 'left', color },
+                            c.mono && { fontVariant: ['tabular-nums'] },
+                          ]}
+                        >
+                          {rendered}
+                        </Text>
+                      ) : rendered}
+                    </View>
+                  );
+                })}
               </TouchableOpacity>
             ))}
           </View>
-          {/* Horizontally scrollable body — synced with header */}
-          <ScrollView
-            ref={bodyScrollRef}
-            horizontal
-            showsHorizontalScrollIndicator
-            scrollEventThrottle={16}
-            onScroll={onBodyHorizScroll}
-            style={{ flex: 1 }}
-          >
-            <View style={{ width: Math.max(totalScrollW, 320) }}>
-              {sortedRows.map((r, idx) => (
-                <TouchableOpacity
-                  key={rowKey ? rowKey(r) : idx.toString()}
-                  testID={`row-${r[stickyField]}`}
-                  activeOpacity={0.7}
-                  onPress={() => handlePressRow(r)}
-                  style={[styles.bodyRow, idx % 2 === 1 && { backgroundColor: theme.colors.bg2 }]}
-                >
-                  {columns.map((c) => {
-                    const tone = c.tone ? c.tone(r) : undefined;
-                    const color =
-                      tone === 'pos' ? theme.colors.success :
-                      tone === 'neg' ? theme.colors.error :
-                      theme.colors.text;
-                    const rendered = c.render ? c.render(r) : (r[c.key] ?? '—');
-                    const isPrimitive = typeof rendered === 'string' || typeof rendered === 'number';
-                    return (
-                      <View key={c.key} style={[styles.bodyCell, { width: c.width || 100 }]}>
-                        {isPrimitive ? (
-                          <Text
-                            numberOfLines={1}
-                            style={[
-                              styles.cell,
-                              { textAlign: c.align || 'left', color },
-                              c.mono && { fontVariant: ['tabular-nums'] },
-                            ]}
-                          >
-                            {rendered}
-                          </Text>
-                        ) : rendered}
-                      </View>
-                    );
-                  })}
-                </TouchableOpacity>
-              ))}
-            </View>
-          </ScrollView>
-        </View>
-      </ScrollView>
+        </ScrollView>
+      </View>
     </View>
   );
 }
