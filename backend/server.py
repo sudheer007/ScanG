@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Query
+from fastapi import FastAPI, APIRouter, HTTPException, Query, Header, Depends
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -19,6 +19,7 @@ import research_service as rs
 import insider_service as ins
 import market_intel_service as mi
 import predictions_service as ps
+import auth_service as auth
 from stock_universe import get_universe, currency
 
 ROOT_DIR = Path(__file__).parent
@@ -80,6 +81,52 @@ async def root():
 @api_router.get("/health")
 async def health():
     return {"status": "ok", "ts": datetime.now(timezone.utc).isoformat()}
+
+
+# ---------- Auth (Google Sign-In) ----------
+class GoogleAuthRequest(BaseModel):
+    id_token: str
+
+
+async def get_current_user(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
+    """Decodes our session JWT from the Authorization header. Raises 401 if missing/invalid."""
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    token = authorization.split(" ", 1)[1].strip()
+    try:
+        payload = auth.decode_session_token(token)
+    except auth.AuthNotConfigured:
+        raise HTTPException(status_code=503, detail="Sign-in not configured on the server")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
+    return {
+        "id": payload["sub"],
+        "email": payload.get("email"),
+        "name": payload.get("name"),
+        "picture": payload.get("picture"),
+    }
+
+
+@api_router.post("/auth/google")
+async def auth_google(req: GoogleAuthRequest):
+    """Exchange a Google ID token (from Google Identity Services) for our own session token."""
+    try:
+        idinfo = auth.verify_google_id_token(req.id_token)
+    except auth.AuthNotConfigured:
+        raise HTTPException(status_code=503, detail="Google Sign-In not configured on the server")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid Google token")
+    user = await auth.get_or_create_user(db, idinfo)
+    try:
+        token = auth.create_session_token(user)
+    except auth.AuthNotConfigured:
+        raise HTTPException(status_code=503, detail="Sign-in not configured on the server")
+    return {"token": token, "user": user}
+
+
+@api_router.get("/auth/me")
+async def auth_me(user: Dict[str, Any] = Depends(get_current_user)):
+    return {"user": user}
 
 
 # ---------- Markets ----------

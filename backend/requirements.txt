@@ -16,3 +16,5 @@ pytest==9.1.1
 httpx==0.28.1
 requests==2.34.2
 google-genai>=1.0.0
+google-auth==2.56.0
+pyjwt==2.9.0

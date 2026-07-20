@@ -15,13 +15,17 @@ import Sparkline from '@/src/components/Sparkline';
 import NewsList from '@/src/components/NewsList';
 import SectorHeatmap from '@/src/components/SectorHeatmap';
 import { EmptyState, ErrorState, LoadingState } from '@/src/components/States';
+import AccountSheet from '@/src/components/AccountSheet';
+import { useAuth } from '@/src/auth/AuthContext';
 
 type Tab = 'overview' | 'movers' | 'sectors' | 'news' | 'calendar';
 
 export default function MarketsScreen() {
   const router = useRouter();
+  const { user } = useAuth();
   const [market, setMarket] = useState<Market>('US');
   const [tab, setTab] = useState<Tab>('overview');
+  const [accountOpen, setAccountOpen] = useState(false);
 
   // data
   const [indices, setIndices] = useState<IndexQuote[]>([]);
@@ -111,10 +115,15 @@ export default function MarketsScreen() {
         <TouchableOpacity testID="open-watchlist" onPress={() => router.push('/(tabs)/watchlist')} style={[styles.iconBtn, { marginRight: 8 }]}>
           <Ionicons name="bookmark-outline" size={19} color={theme.colors.text} />
         </TouchableOpacity>
-        <TouchableOpacity testID="open-search" onPress={() => router.push('/search')} style={styles.iconBtn}>
+        <TouchableOpacity testID="open-search" onPress={() => router.push('/search')} style={[styles.iconBtn, { marginRight: 8 }]}>
           <Ionicons name="search" size={20} color={theme.colors.text} />
         </TouchableOpacity>
+        <TouchableOpacity testID="open-account" onPress={() => setAccountOpen(true)} style={styles.iconBtn}>
+          <Ionicons name={user ? 'person-circle' : 'person-circle-outline'} size={22} color={theme.colors.text} />
+        </TouchableOpacity>
       </View>
+
+      <AccountSheet open={accountOpen} onClose={() => setAccountOpen(false)} />
 
       <ChipRow
         testID="market-toggle"
