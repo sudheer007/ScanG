@@ -1,9 +1,18 @@
 const BASE = process.env.EXPO_PUBLIC_BACKEND_URL;
 
+// Set by AuthContext once a user signs in; read here so every request carries
+// the session automatically without every call site needing to know about auth.
+let authToken: string | null = null;
+export function setAuthToken(token: string | null) {
+  authToken = token;
+}
+
 async function http<T = any>(path: string, opts: RequestInit = {}): Promise<T> {
   const url = `${BASE}/api${path}`;
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (authToken) headers.Authorization = `Bearer ${authToken}`;
   const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: { ...headers, ...(opts.headers as Record<string, string> | undefined) },
     ...opts,
   });
   if (!res.ok) {
@@ -378,9 +387,20 @@ export interface SectorRow {
   market_cap_total: number;
 }
 
+export interface AuthUser {
+  id: string;
+  email: string | null;
+  name: string | null;
+  picture: string | null;
+}
+
 export const api = {
   health: () => http('/health'),
   peek,
+  // ---- Auth (Google Sign-In) ----
+  authGoogle: (idToken: string) =>
+    http<{ token: string; user: AuthUser }>('/auth/google', { method: 'POST', body: JSON.stringify({ id_token: idToken }) }),
+  authMe: () => http<{ user: AuthUser }>('/auth/me'),
   marketOverview: (market: Market, force = false) =>
     cget<{ market: Market; currency: string; indices: IndexQuote[]; gainers: Stock[]; losers: Stock[] }>(
       `/markets/overview?market=${market}`, 60000, force, true,

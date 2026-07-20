@@ -6,6 +6,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 
 import { useIconFonts } from "@/src/hooks/use-icon-fonts";
+import { AuthProvider } from "@/src/auth/AuthContext";
 
 LogBox.ignoreAllLogs(true);
 
@@ -39,16 +40,18 @@ export default function RootLayout() {
   );
 
   return (
-    <SafeAreaProvider>
-      {Platform.OS === "web" ? (
-        <View style={{ flex: 1, backgroundColor: "#000" }}>
-          <View style={{ flex: 1, width: "100%", maxWidth: 480, alignSelf: "center", backgroundColor: "#0A0A0C" }}>
-            {content}
+    <AuthProvider>
+      <SafeAreaProvider>
+        {Platform.OS === "web" ? (
+          <View style={{ flex: 1, backgroundColor: "#000" }}>
+            <View style={{ flex: 1, width: "100%", maxWidth: 480, alignSelf: "center", backgroundColor: "#0A0A0C" }}>
+              {content}
+            </View>
           </View>
-        </View>
-      ) : (
-        <View style={{ flex: 1, backgroundColor: "#0A0A0C" }}>{content}</View>
-      )}
-    </SafeAreaProvider>
+        ) : (
+          <View style={{ flex: 1, backgroundColor: "#0A0A0C" }}>{content}</View>
+        )}
+      </SafeAreaProvider>
+    </AuthProvider>
   );
 }
