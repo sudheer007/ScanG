@@ -35,6 +35,9 @@ Pillow==11.1.0
 pytesseract==0.3.13
 
 # Payments (Razorpay Premium subscriptions)
-# setuptools provides pkg_resources — required by razorpay on Python 3.12 (Render)
+# setuptools provides pkg_resources — required by razorpay on Python 3.12 (Render slim image
+# does not ship setuptools/pkg_resources by default). wheel is installed alongside for the
+# same reason (build backends expect both present).
 razorpay==1.4.2
 setuptools>=69.0.0
+wheel>=0.42.0
