@@ -1,0 +1,12 @@
+# Render Docker web service — set Root Directory to backend-v2 (or deploy this file from that folder).
+# Set env vars in the Render dashboard: MONGO_URL, DB_NAME, CORS_ORIGINS,
+# FIREBASE_CREDENTIALS_JSON (and optional INGESTION_ADMIN_KEY),
+# RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET,
+# RAZORPAY_PLAN_ID_MONTHLY, RAZORPAY_PLAN_ID_YEARLY.
+services:
+  - type: web
+    name: scang-backend-v2
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health

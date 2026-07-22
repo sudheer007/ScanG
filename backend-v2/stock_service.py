@@ -706,6 +706,42 @@ async def get_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
     return out
 
 
+async def get_live_quote(symbol: str) -> Optional[Dict[str, Any]]:
+    """Single-symbol quote without chart/sparkline or universe batch cache.
+
+    Used by short-horizon prediction pollers that need fresh prices every 1–2s.
+    `_yh_quote_batch` only caches batches of 50+ symbols, so a single-symbol
+    call always hits Yahoo.
+    """
+    quote_map = await asyncio.to_thread(_yh_quote_batch, [symbol])
+    q = quote_map.get(symbol) or {}
+    price = _safe(q.get("regularMarketPrice"))
+    if price is None:
+        return None
+    return {
+        "symbol": symbol,
+        "name": q.get("longName") or q.get("shortName") or symbol,
+        "price": price,
+        "change": _safe(q.get("regularMarketChange")),
+        "change_pct": _safe(q.get("regularMarketChangePercent")),
+        "volume": _safe(q.get("regularMarketVolume")),
+        "currency": q.get("currency") or ("INR" if symbol.endswith(".NS") or symbol == "^NSEI" else "USD"),
+    }
+
+
+async def get_raw_quotes(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
+    """Raw Yahoo v7 quote fields per symbol (price, bid/ask, volume, day range, ...).
+
+    Unlike `get_quotes`, this returns the unmapped Yahoo payload so callers can
+    read whatever fields they need (e.g. `regularMarketVolume`, `bid`, `ask`,
+    `regularMarketDayHigh`). Small baskets (<50 symbols) bypass the long-lived
+    batch cache and always fetch fresh — used by the short-horizon prediction
+    engine to poll a correlated basket (index + sector index + volatility +
+    ETF-with-volume) in a single request every 1–2s.
+    """
+    return await asyncio.to_thread(_yh_quote_batch, symbols)
+
+
 async def get_market_indices(market: str) -> List[Dict[str, Any]]:
     idx_map = get_indices(market)
     quotes = await get_quotes(list(idx_map.keys()))

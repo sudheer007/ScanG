@@ -120,12 +120,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setGoogleIsNewUser(false);
       }
       setProfile(me);
-    } catch {
+    } catch (err) {
       // Backend unreachable (common with localhost on a physical device).
-      // Still gate new / first-session users onto the welcome screen.
+      // Prefer an already-synced server profile over wiping it with a local fallback
+      // when a concurrent /me call fails (e.g. race with onAuthStateChanged).
+      console.warn('[auth] GET /api/me failed — Mongo users row may be missing', err);
       const needsName = isNewUser || isLikelyFirstSession(nextUser);
-      setProfile(fallbackProfile(nextUser, !needsName));
       if (needsName) setGoogleIsNewUser(true);
+      setProfile((prev) => {
+        if (prev?.uid === nextUser.uid) return prev;
+        return fallbackProfile(nextUser, !needsName);
+      });
     }
   }, []);
 
@@ -183,24 +188,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!trimmed) {
       throw new Error('Please enter your name');
     }
+    // Must succeed against the API so the Mongo `users` document is created/updated.
+    // Soft local-only success previously let users into the app with no DB row.
     try {
       const me = await api.completeOnboarding(trimmed.slice(0, 50));
       setProfile(me);
-    } catch {
-      // Persist locally if backend is down so the user can enter the app.
-      if (!auth.currentUser) throw new Error('Could not save your name');
-      setProfile(fallbackProfile(auth.currentUser, true));
-      if (auth.currentUser.displayName !== trimmed) {
-        // Keep the chosen name in local profile even if Firebase update isn't available.
-        setProfile({
-          uid: auth.currentUser.uid,
-          email: auth.currentUser.email,
-          display_name: trimmed.slice(0, 50),
-          onboarding_completed: true,
-        });
-      }
+      setGoogleIsNewUser(false);
+    } catch (err) {
+      console.warn('[auth] POST /api/me/onboarding failed', err);
+      const message =
+        err instanceof Error && err.message
+          ? err.message
+          : 'Could not save your name — check that the API is reachable';
+      throw new Error(message);
     }
-    setGoogleIsNewUser(false);
   }, []);
 
   const signOut = useCallback(async () => {

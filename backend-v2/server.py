@@ -20,15 +20,19 @@ import analyzer_service as az
 import news_service as news
 import ingestion_service as ing
 import auth_service as auth
+import prediction_service as pred
+import payment_service as pay
 from auth_service import FirebaseUser
 from stock_universe import get_universe, currency
 from watchlist_import import (
     resolve_symbols,
 )
+from portfolio_holdings import resolve_holdings
 from portfolio_document import (
     OcrUnavailableError,
     UnsupportedPortfolioFileError,
     extract_raw_symbols_from_upload,
+    extract_holdings_from_upload,
     is_supported_extension,
     max_bytes_for_filename,
 )
@@ -62,6 +66,26 @@ class WatchlistAdd(BaseModel):
     market: str
 
 
+# ---------- Portfolio Models ----------
+class PortfolioHolding(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    symbol: str
+    market: str
+    quantity: float
+    avg_price: float
+    added_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class PortfolioHoldingUpsert(BaseModel):
+    user_id: Optional[str] = None
+    symbol: str
+    market: str
+    quantity: float
+    avg_price: float
+
+
 class SavedScreen(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
@@ -89,6 +113,16 @@ class UserProfile(BaseModel):
 
 class CompleteOnboardingRequest(BaseModel):
     display_name: str = Field(..., min_length=1, max_length=50)
+
+
+class CreateSubscriptionRequest(BaseModel):
+    plan_id: str = Field(..., min_length=1, max_length=64)
+
+
+class VerifyPaymentRequest(BaseModel):
+    razorpay_payment_id: str = Field(..., min_length=1, max_length=128)
+    razorpay_subscription_id: str = Field(..., min_length=1, max_length=128)
+    razorpay_signature: str = Field(..., min_length=1, max_length=256)
 
 
 class CustomScreenRequest(BaseModel):
@@ -382,6 +416,36 @@ async def discover_institutional_activity(market: str = Query("US"), limit: int 
 @api_router.get("/analyzer/{symbol}")
 async def deep_analyzer(symbol: str):
     return await az.analyzer(symbol)
+
+
+# ---------- Nifty 50 short-horizon prediction ----------
+@api_router.get("/predict/nifty")
+@limiter.limit("60/minute")
+async def predict_nifty(
+    request: Request,
+    horizon: int = Query(10, description="Prediction horizon in seconds"),
+):
+    if horizon not in pred.HORIZONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"horizon must be one of {list(pred.HORIZONS)}",
+        )
+    return await pred.get_prediction(horizon)
+
+
+@api_router.get("/predict/nifty/history")
+@limiter.limit("30/minute")
+async def predict_nifty_history(
+    request: Request,
+    limit: int = Query(50, ge=1, le=200),
+):
+    return pred.get_history(limit)
+
+
+@api_router.get("/predict/nifty/stats")
+@limiter.limit("30/minute")
+async def predict_nifty_stats(request: Request):
+    return pred.get_stats()
 
 
 # ---------- Ingestion (Investing.com batch + on-demand refresh) ----------
@@ -708,6 +772,203 @@ async def import_watchlist_portfolio(
     }
 
 
+# ---------- Portfolio (user holdings with qty + avg cost) ----------
+@api_router.post("/portfolio")
+@limiter.limit("30/minute")
+async def upsert_portfolio_holding(
+    request: Request,
+    item: PortfolioHoldingUpsert,
+    user: FirebaseUser = Depends(auth.require_firebase_user),
+):
+    if item.user_id and item.user_id != user.uid:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if item.quantity <= 0:
+        raise HTTPException(status_code=400, detail="quantity must be > 0")
+    if item.avg_price <= 0:
+        raise HTTPException(status_code=400, detail="avg_price must be > 0")
+
+    now = datetime.now(timezone.utc)
+    existing = await db.portfolio.find_one({"user_id": user.uid, "symbol": item.symbol})
+    if existing:
+        await db.portfolio.update_one(
+            {"user_id": user.uid, "symbol": item.symbol},
+            {
+                "$set": {
+                    "quantity": item.quantity,
+                    "avg_price": item.avg_price,
+                    "market": item.market,
+                    "updated_at": now,
+                }
+            },
+        )
+        doc = await db.portfolio.find_one({"user_id": user.uid, "symbol": item.symbol}, {"_id": 0})
+        return {"ok": True, "updated": True, "item": doc}
+
+    holding = PortfolioHolding(
+        user_id=user.uid,
+        symbol=item.symbol,
+        market=item.market,
+        quantity=item.quantity,
+        avg_price=item.avg_price,
+        added_at=now,
+        updated_at=now,
+    )
+    await db.portfolio.insert_one(holding.dict())
+    return {"ok": True, "updated": False, "item": holding.dict()}
+
+
+@api_router.delete("/portfolio/{user_id}/{symbol}")
+@limiter.limit("30/minute")
+async def remove_portfolio_holding(
+    request: Request,
+    user_id: str,
+    symbol: str,
+    user: FirebaseUser = Depends(auth.require_self_user),
+):
+    res = await db.portfolio.delete_one({"user_id": user.uid, "symbol": symbol})
+    return {"ok": True, "deleted": res.deleted_count}
+
+
+@api_router.get("/portfolio/{user_id}")
+@limiter.limit("30/minute")
+async def list_portfolio(
+    request: Request,
+    user_id: str,
+    user: FirebaseUser = Depends(auth.require_self_user),
+):
+    items = await db.portfolio.find({"user_id": user.uid}, {"_id": 0}).to_list(200)
+    return {"items": items}
+
+
+@api_router.post("/portfolio/import")
+@limiter.limit("10/minute")
+async def import_portfolio(
+    request: Request,
+    file: UploadFile = File(...),
+    market: Optional[str] = Form(None),
+    user: FirebaseUser = Depends(auth.require_firebase_user),
+):
+    """Parse a portfolio file and upsert holdings (symbol, quantity, avg price)."""
+    filename = (file.filename or "").lower()
+    if filename and not is_supported_extension(filename):
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported file type. Upload CSV, TSV, TXT, PDF, or an image (JPEG/PNG/WebP).",
+        )
+
+    market_override = None
+    if market:
+        market_override = market.strip().upper()
+        if market_override not in ("US", "IN"):
+            raise HTTPException(status_code=400, detail="market must be US or IN")
+
+    raw_bytes = await file.read()
+    if not raw_bytes:
+        raise HTTPException(status_code=400, detail="Empty file")
+
+    size_limit = max_bytes_for_filename(filename)
+    if len(raw_bytes) > size_limit:
+        mb = size_limit // (1024 * 1024)
+        raise HTTPException(status_code=400, detail=f"File too large (max {mb} MB)")
+
+    try:
+        raw_holdings, source = extract_holdings_from_upload(
+            raw_bytes,
+            filename,
+            file.content_type,
+            market=market_override,
+        )
+    except UnsupportedPortfolioFileError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except OcrUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Unable to decode file as text") from exc
+
+    if not raw_holdings:
+        raise HTTPException(
+            status_code=400,
+            detail="No holdings found. Include Symbol, Qty, and Avg Price columns.",
+        )
+
+    resolved = resolve_holdings(raw_holdings, market=market_override)
+    valid = resolved["valid"]
+    invalid = resolved["invalid"]
+
+    added: List[Dict[str, Any]] = []
+    updated = 0
+
+    if valid:
+        existing_docs = await db.portfolio.find(
+            {"user_id": user.uid, "symbol": {"$in": [v["symbol"] for v in valid]}},
+            {"_id": 0, "symbol": 1},
+        ).to_list(len(valid))
+        existing_symbols = {doc["symbol"] for doc in existing_docs}
+
+        ops = []
+        now = datetime.now(timezone.utc)
+        for entry in valid:
+            symbol = entry["symbol"]
+            if symbol in existing_symbols:
+                updated += 1
+                ops.append(
+                    UpdateOne(
+                        {"user_id": user.uid, "symbol": symbol},
+                        {
+                            "$set": {
+                                "quantity": entry["quantity"],
+                                "avg_price": entry["avg_price"],
+                                "market": entry["market"],
+                                "updated_at": now,
+                            }
+                        },
+                    )
+                )
+            else:
+                holding = PortfolioHolding(
+                    user_id=user.uid,
+                    symbol=symbol,
+                    market=entry["market"],
+                    quantity=entry["quantity"],
+                    avg_price=entry["avg_price"],
+                    added_at=now,
+                    updated_at=now,
+                )
+                doc = holding.dict()
+                ops.append(
+                    UpdateOne(
+                        {"user_id": user.uid, "symbol": symbol},
+                        {"$setOnInsert": doc},
+                        upsert=True,
+                    )
+                )
+                added.append(
+                    {
+                        "symbol": symbol,
+                        "market": entry["market"],
+                        "quantity": entry["quantity"],
+                        "avg_price": entry["avg_price"],
+                    }
+                )
+
+        if ops:
+            await db.portfolio.bulk_write(ops, ordered=False)
+
+    return {
+        "ok": True,
+        "summary": {
+            "parsed": resolved["parsed"],
+            "added": len(added),
+            "updated": updated,
+            "invalid": len(invalid),
+            "truncated": resolved["truncated"],
+            "source": source,
+        },
+        "added": added,
+        "invalid": invalid,
+    }
+
+
 # ---------- Saved Screens ----------
 @api_router.post("/screens")
 @limiter.limit("30/minute")
@@ -755,6 +1016,109 @@ async def delete_screen(
     return {"ok": True, "deleted": res.deleted_count}
 
 
+# ---------- Payments (Razorpay Premium subscriptions) ----------
+@api_router.get("/payments/plans")
+@limiter.limit("60/minute")
+async def list_payment_plans(request: Request):
+    return {"items": pay.public_plans()}
+
+
+@api_router.post("/payments/subscriptions")
+@limiter.limit("10/minute")
+async def create_payment_subscription(
+    request: Request,
+    body: CreateSubscriptionRequest,
+    user: FirebaseUser = Depends(auth.require_firebase_user),
+):
+    try:
+        result = await pay.create_subscription(db, user, body.plan_id.strip())
+    except pay.PaymentError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+    return {"ok": True, **result}
+
+
+@api_router.post("/payments/verify")
+@limiter.limit("20/minute")
+async def verify_payment(
+    request: Request,
+    body: VerifyPaymentRequest,
+    user: FirebaseUser = Depends(auth.require_firebase_user),
+):
+    try:
+        result = await pay.verify_and_record_payment(
+            db,
+            user,
+            razorpay_payment_id=body.razorpay_payment_id.strip(),
+            razorpay_subscription_id=body.razorpay_subscription_id.strip(),
+            razorpay_signature=body.razorpay_signature.strip(),
+        )
+    except pay.SignatureVerificationError as exc:
+        raise HTTPException(status_code=400, detail=exc.message)
+    except pay.PaymentError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+    return result
+
+
+@api_router.post("/payments/webhook")
+async def razorpay_webhook(request: Request):
+    """Public Razorpay webhook — no Firebase auth; signature is the auth."""
+    raw = await request.body()
+    signature = request.headers.get("X-Razorpay-Signature") or ""
+    event_id = request.headers.get("X-Razorpay-Event-Id")
+    try:
+        pay.verify_webhook_signature(raw, signature)
+    except pay.SignatureVerificationError:
+        raise HTTPException(status_code=400, detail="Invalid webhook signature")
+
+    import json
+
+    try:
+        event = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise HTTPException(status_code=400, detail="Invalid webhook payload")
+
+    try:
+        result = await pay.handle_webhook_event(db, event_id, event)
+    except Exception as exc:
+        logger.warning("Webhook processing failed: %s", exc)
+        # Return 200 after signature OK so Razorpay does not hammer retries on
+        # transient DB issues — event is already accepted; log for ops.
+        return {"ok": False, "error": "processing_failed"}
+    return result
+
+
+@api_router.get("/payments/me/subscription")
+@limiter.limit("30/minute")
+async def my_subscription(
+    request: Request,
+    user: FirebaseUser = Depends(auth.require_firebase_user),
+):
+    return await pay.get_entitlement(db, user.uid)
+
+
+@api_router.post("/payments/me/subscription/cancel")
+@limiter.limit("5/minute")
+async def cancel_my_subscription(
+    request: Request,
+    user: FirebaseUser = Depends(auth.require_firebase_user),
+):
+    try:
+        entitlement = await pay.cancel_subscription(db, user.uid)
+    except pay.PaymentError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+    return {"ok": True, "subscription": entitlement}
+
+
+@api_router.get("/payments/me/payments")
+@limiter.limit("30/minute")
+async def my_payments(
+    request: Request,
+    user: FirebaseUser = Depends(auth.require_firebase_user),
+):
+    items = await pay.list_payments(db, user.uid)
+    return {"items": items}
+
+
 # ---------- Mount ----------
 app.include_router(api_router)
 
@@ -781,6 +1145,8 @@ async def prewarm():
     """Pre-warm caches so the first Markets screen load is fast."""
     import asyncio
 
+    pred.start_poller()
+
     async def _warm():
         try:
             # Quote+index path first (what /markets/overview needs), then full universe.
@@ -797,4 +1163,5 @@ async def prewarm():
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
+    await pred.stop_poller()
     client.close()

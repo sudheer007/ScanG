@@ -11,6 +11,7 @@ import pytest
 from portfolio_document import (
     OcrUnavailableError,
     UnsupportedPortfolioFileError,
+    extract_holdings_from_upload,
     extract_raw_symbols_from_upload,
     extract_symbols_from_text,
 )
@@ -105,3 +106,64 @@ class TestFileRouting:
         symbols, source = extract_raw_symbols_from_upload(content, "list.txt", "text/plain")
         assert source == "csv"
         assert symbols == ["TSLA"]
+
+
+class TestHoldingsFromUpload:
+    def test_csv_holdings(self):
+        content = b"Symbol,Qty,Avg Price\nAAPL,10,150\nMSFT,5,300\n"
+        holdings, source = extract_holdings_from_upload(content, "h.csv", "text/csv")
+        assert source == "csv"
+        assert len(holdings) == 2
+        assert holdings[0]["raw"] == "AAPL"
+        assert holdings[0]["quantity"] == 10
+        assert holdings[0]["avg_price"] == 150
+
+    def test_pipe_table_holdings(self):
+        content = b"Symbol | Qty | Avg Price\nAAPL | 10 | 150\nNVDA | 2 | 400\n"
+        holdings, source = extract_holdings_from_upload(content, "h.txt", "text/plain")
+        assert source == "csv"
+        assert len(holdings) == 2
+        assert {h["raw"] for h in holdings} == {"AAPL", "NVDA"}
+
+    def test_pdf_text_holdings(self):
+        pdf_bytes = _make_text_pdf("Symbol Qty Avg Price\nAAPL 10 150\nMSFT 5 300\n")
+        # Space-separated may not parse as holdings; ensure path returns tuple
+        holdings, source = extract_holdings_from_upload(
+            pdf_bytes, "portfolio.pdf", "application/pdf"
+        )
+        assert source in {"pdf_text", "pdf_ocr"}
+        assert isinstance(holdings, list)
+
+    def test_pdf_tabular_holdings(self):
+        # Build a PDF with clear header/value rows that survive text extraction
+        doc = fitz.open()
+        page = doc.new_page()
+        page.insert_text((72, 72), "Symbol,Qty,Avg Price")
+        page.insert_text((72, 92), "AAPL,10,150")
+        page.insert_text((72, 112), "MSFT,5,300")
+        buf = io.BytesIO()
+        doc.save(buf)
+        doc.close()
+        holdings, source = extract_holdings_from_upload(
+            buf.getvalue(), "portfolio.pdf", "application/pdf"
+        )
+        assert source == "pdf_text"
+        assert len(holdings) >= 2
+        symbols = {h["raw"] for h in holdings}
+        assert "AAPL" in symbols
+        assert "MSFT" in symbols
+
+    @patch("portfolio_document._ocr_bytes_as_image")
+    def test_image_holdings_ocr(self, mock_ocr):
+        mock_ocr.return_value = "Symbol,Qty,Avg Price\nAAPL,4,120\n"
+        holdings, source = extract_holdings_from_upload(
+            b"\x89PNG\r\n", "shot.png", "image/png"
+        )
+        assert source == "image_ocr"
+        assert len(holdings) == 1
+        assert holdings[0]["raw"] == "AAPL"
+        assert holdings[0]["quantity"] == 4
+
+    def test_unsupported_holdings_extension(self):
+        with pytest.raises(UnsupportedPortfolioFileError):
+            extract_holdings_from_upload(b"data", "file.xlsx", None)

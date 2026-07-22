@@ -15,6 +15,7 @@ import { theme } from '@/src/theme';
 import { authTheme } from '@/src/auth/authTheme';
 import { useAuth } from '@/src/hooks/useAuth';
 import { listWatchlist } from '@/src/services/watchlistService';
+import { listPortfolio } from '@/src/services/portfolioService';
 
 const ACCENT = authTheme.colors.primary; // logo blue #1A82FF
 const ACCENT_DIM = 'rgba(26, 130, 255, 0.14)';
@@ -33,12 +34,16 @@ export default function MoreScreen() {
   const router = useRouter();
   const { user, profile } = useAuth();
   const [watchCount, setWatchCount] = useState(0);
+  const [portfolioCount, setPortfolioCount] = useState(0);
 
   useFocusEffect(
     useCallback(() => {
       let active = true;
-      listWatchlist(user?.uid).then((list) => {
-        if (active) setWatchCount(list.length);
+      Promise.all([listWatchlist(user?.uid), listPortfolio(user?.uid)]).then(([watch, port]) => {
+        if (active) {
+          setWatchCount(watch.length);
+          setPortfolioCount(port.length);
+        }
       });
       return () => {
         active = false;
@@ -53,6 +58,33 @@ export default function MoreScreen() {
     'Trader';
 
   const items: MenuItem[] = [
+    {
+      key: 'subscribe',
+      title: 'Upgrade to Premium',
+      subtitle: 'Unlock full screener & analyzer',
+      icon: 'diamond-outline',
+      href: '/subscribe' as Href,
+      testID: 'more-subscribe',
+    },
+    {
+      key: 'nifty-pulse',
+      title: 'Nifty Pulse',
+      subtitle: '5–30s Nifty 50 up/down signal',
+      icon: 'pulse-outline',
+      href: '/nifty-pulse' as Href,
+      testID: 'more-nifty-pulse',
+    },
+    {
+      key: 'portfolio',
+      title: 'Portfolio',
+      subtitle:
+        portfolioCount === 0
+          ? 'Upload holdings to track P&L'
+          : `${portfolioCount} holding${portfolioCount === 1 ? '' : 's'}`,
+      icon: 'pie-chart-outline',
+      href: '/portfolio' as Href,
+      testID: 'more-portfolio',
+    },
     {
       key: 'watchlist',
       title: 'Watchlist',

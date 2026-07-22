@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import io
 import os
 import re
@@ -24,6 +25,7 @@ from watchlist_import import (
     normalize_header,
     normalize_symbol,
 )
+from portfolio_holdings import extract_raw_holdings
 
 TEXT_EXTENSIONS = {".csv", ".tsv", ".txt"}
 PDF_EXTENSIONS = {".pdf"}
@@ -289,6 +291,73 @@ def extract_raw_symbols_from_upload(
 
     if kind == "image":
         return _extract_from_image(raw_bytes, market)
+
+    raise UnsupportedPortfolioFileError(
+        "Unsupported file type. Upload CSV, TSV, TXT, PDF, or an image (JPEG/PNG/WebP)."
+    )
+
+
+def _holdings_from_text(text: str) -> List[dict]:
+    """Try tabular holdings parse, then header-column split for pipe/OCR layouts."""
+    holdings = extract_raw_holdings(text)
+    if holdings:
+        return holdings
+
+    # Rebuild as TSV from lines that look like header + rows (OCR/PDF tables)
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    for i, line in enumerate(lines):
+        parts = re.split(r"\s*[|,\t;]\s*", line)
+        if not parts:
+            continue
+        headers = [normalize_header(p) for p in parts]
+        if not any(h in SYMBOL_HEADERS for h in headers):
+            continue
+        # Rebuild a CSV block from this header + subsequent rows
+        block_rows = [parts]
+        for row_line in lines[i + 1 :]:
+            row_parts = re.split(r"\s*[|,\t;]\s*", row_line)
+            if len(row_parts) < 2:
+                continue
+            block_rows.append(row_parts)
+        if len(block_rows) < 2:
+            continue
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerows(block_rows)
+        holdings = extract_raw_holdings(buf.getvalue())
+        if holdings:
+            return holdings
+    return []
+
+
+def extract_holdings_from_upload(
+    raw_bytes: bytes,
+    filename: str,
+    content_type: Optional[str] = None,
+    market: Optional[str] = None,
+) -> Tuple[List[dict], str]:
+    """
+    Extract holdings (symbol, quantity, avg_price) from an upload.
+    Returns (holdings, source).
+    """
+    kind = _classify_file(filename, content_type)
+
+    if kind == "text":
+        text = _decode_text_bytes(raw_bytes)
+        return _holdings_from_text(text), "csv"
+
+    if kind == "pdf":
+        text = _extract_pdf_text_and_tables(raw_bytes)
+        holdings = _holdings_from_text(text)
+        if holdings:
+            return holdings, "pdf_text"
+        ocr_text = _extract_pdf_via_ocr(raw_bytes)
+        combined = f"{text}\n{ocr_text}".strip()
+        return _holdings_from_text(combined), "pdf_ocr"
+
+    if kind == "image":
+        text = _ocr_bytes_as_image(raw_bytes)
+        return _holdings_from_text(text), "image_ocr"
 
     raise UnsupportedPortfolioFileError(
         "Unsupported file type. Upload CSV, TSV, TXT, PDF, or an image (JPEG/PNG/WebP)."

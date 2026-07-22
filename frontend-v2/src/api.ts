@@ -289,6 +289,109 @@ export interface SectorRow {
   top_loser?: string | null;
 }
 
+export type NiftyDirection = 'UP' | 'DOWN' | 'FLAT';
+
+export interface NiftyTick {
+  t: string;
+  p: number;
+}
+
+export interface NiftyBankSignal {
+  price: number | null;
+  mom_bps: number;
+  confirms: 'up' | 'down' | 'neutral';
+}
+
+export interface NiftyVixSignal {
+  price: number | null;
+  mom_bps: number;
+  pressure: 'bearish' | 'bullish' | 'neutral';
+}
+
+export interface NiftyVolumeSignal {
+  etf_symbol: string;
+  surge_ratio: number;
+  label: 'high' | 'low' | 'normal';
+}
+
+export interface NiftySignals {
+  bank_nifty: NiftyBankSignal;
+  india_vix: NiftyVixSignal;
+  volume: NiftyVolumeSignal;
+  spread_bps: number;
+  range_position: number;
+  from_open_bps: number;
+}
+
+export interface NiftyPredictResponse {
+  symbol: string;
+  name: string;
+  currency: string;
+  price: number | null;
+  change: number | null;
+  change_pct: number | null;
+  horizon_sec: number;
+  direction: NiftyDirection;
+  confidence: number;
+  score: number;
+  features: Record<string, number>;
+  signals: NiftySignals;
+  as_of: string;
+  session: 'open' | 'closed';
+  ticks: NiftyTick[];
+  stats: {
+    hit_rate_5s?: number | null;
+    hit_rate_10s?: number | null;
+    hit_rate_15s?: number | null;
+    hit_rate_30s?: number | null;
+    hit_rate_60s?: number | null;
+    n?: number;
+    hits?: number;
+    misses?: number;
+    [key: string]: number | null | undefined;
+  };
+  poll_count: number;
+  last_error: string | null;
+  disclaimer: string;
+}
+
+export interface NiftyPredictHistoryItem {
+  id: string;
+  horizon_sec: number;
+  direction: NiftyDirection;
+  confidence: number;
+  price_at: number;
+  predicted_at: string;
+  outcome: 'hit' | 'miss' | 'flat' | null;
+  price_after: number | null;
+  resolved_at: string | null;
+}
+
+export interface NiftyPredictHistoryResponse {
+  symbol: string;
+  count: number;
+  predictions: NiftyPredictHistoryItem[];
+  disclaimer: string;
+}
+
+export interface NiftyHorizonStats {
+  n: number;
+  hits: number;
+  misses: number;
+  flats: number;
+  hit_rate: number | null;
+}
+
+export interface NiftyPredictStatsResponse {
+  symbol: string;
+  overall: NiftyHorizonStats;
+  by_horizon: Record<string, NiftyHorizonStats>;
+  poll_count: number;
+  tick_count: number;
+  session: 'open' | 'closed';
+  disclaimer: string;
+}
+
 export const api = {
   health: () => http('/health'),
   peek,
@@ -339,6 +442,13 @@ export const api = {
   discoverSectorRotation: (market: Market, force = false) => cget<{ market: Market; currency: string; sectors: SectorRow[] }>(`/discover/sector-rotation?market=${market}`, 120000, force),
   discoverInstitutional: (market: Market, force = false) => cget<any>(`/discover/institutional-activity?market=${market}`, 300000, force),
   analyzer: (symbol: string, force = false) => cget<import('@/src/types/analyzer').AnalyzerResult>(`/analyzer/${encodeURIComponent(symbol)}`, 300000, force),
+
+  // ---- Nifty 50 short-horizon pulse (uncached — poll every 1–2s) ----
+  niftyPredict: (horizon: 5 | 10 | 15 | 30 | 60 = 10) =>
+    http<NiftyPredictResponse>(`/predict/nifty?horizon=${horizon}`),
+  niftyPredictHistory: (limit = 50) =>
+    http<NiftyPredictHistoryResponse>(`/predict/nifty/history?limit=${limit}`),
+  niftyPredictStats: () => http<NiftyPredictStatsResponse>(`/predict/nifty/stats`),
 
   // ---- Ingestion admin (Phase 3) ----
   ingestionStatus: (force = false) =>
@@ -472,6 +582,86 @@ export const api = {
       invalid: { raw: string; reason: string }[];
     }>;
   },
+
+  // ---- Portfolio (holdings) ----
+  listPortfolio: (userId: string) =>
+    http<{
+      items: {
+        id: string;
+        user_id: string;
+        symbol: string;
+        market: Market;
+        quantity: number;
+        avg_price: number;
+        added_at: string;
+        updated_at?: string;
+      }[];
+    }>(`/portfolio/${encodeURIComponent(userId)}`, { auth: true }),
+
+  upsertPortfolioHolding: (body: {
+    symbol: string;
+    market: Market;
+    quantity: number;
+    avg_price: number;
+  }) =>
+    http<{ ok: boolean; updated?: boolean; item?: unknown }>('/portfolio', {
+      method: 'POST',
+      body: JSON.stringify(body),
+      auth: true,
+    }),
+
+  removePortfolioHolding: (userId: string, symbol: string) =>
+    http<{ ok: boolean; deleted: number }>(
+      `/portfolio/${encodeURIComponent(userId)}/${encodeURIComponent(symbol)}`,
+      { method: 'DELETE', auth: true },
+    ),
+
+  importPortfolio: async (
+    file: { uri: string; name: string; mimeType?: string | null; file?: File },
+    opts?: { market?: Market },
+  ) => {
+    const token = await getAuthToken();
+    if (!token) throw new Error('Authentication required');
+
+    const form = new FormData();
+    const uploadName = file.name || 'portfolio.csv';
+    if (file.file) {
+      form.append('file', file.file, uploadName);
+    } else {
+      form.append('file', {
+        uri: file.uri,
+        name: uploadName,
+        type: portfolioUploadMimeType(uploadName, file.mimeType),
+      } as any);
+    }
+    if (opts?.market) form.append('market', opts.market);
+
+    const url = `${BASE}/api/portfolio/import`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => '');
+      const detail = parseErrorDetail(txt);
+      throw new ApiError(res.status, detail || `API ${res.status}: /portfolio/import`);
+    }
+    return res.json() as Promise<{
+      ok: boolean;
+      summary: {
+        parsed: number;
+        added: number;
+        updated: number;
+        invalid: number;
+        truncated: boolean;
+        source?: string;
+      };
+      added: { symbol: string; market: Market; quantity: number; avg_price: number }[];
+      invalid: { raw: string; reason: string }[];
+    }>;
+  },
+
   listScreens: (userId: string) =>
     http<{ items: { id: string; user_id: string; name: string; market: Market; filters: Record<string, any> }[] }>(
       `/screens/${encodeURIComponent(userId)}`,
@@ -481,4 +671,100 @@ export const api = {
     http('/screens', { method: 'POST', body: JSON.stringify(body), auth: true }),
   deleteScreen: (screenId: string) =>
     http(`/screens/${encodeURIComponent(screenId)}`, { method: 'DELETE', auth: true }),
+
+  // ----- Payments (Razorpay Premium) -----
+  getPlans: () =>
+    http<{ items: PaymentPlan[] }>('/payments/plans'),
+
+  createSubscription: (planId: string) =>
+    http<CreateSubscriptionResponse>('/payments/subscriptions', {
+      method: 'POST',
+      body: JSON.stringify({ plan_id: planId }),
+      auth: true,
+    }),
+
+  verifyPayment: (payload: {
+    razorpay_payment_id: string;
+    razorpay_subscription_id: string;
+    razorpay_signature: string;
+  }) =>
+    http<VerifyPaymentResponse>('/payments/verify', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      auth: true,
+    }),
+
+  getMySubscription: () =>
+    http<SubscriptionEntitlement>('/payments/me/subscription', { auth: true }),
+
+  cancelSubscription: () =>
+    http<{ ok: boolean; subscription: SubscriptionEntitlement }>(
+      '/payments/me/subscription/cancel',
+      { method: 'POST', auth: true },
+    ),
+
+  getPaymentHistory: () =>
+    http<{ items: PaymentHistoryItem[] }>('/payments/me/payments', { auth: true }),
+};
+
+export type PaymentPlan = {
+  id: string;
+  name: string;
+  description: string;
+  amount: number;
+  currency: string;
+  interval: string;
+  features: string[];
+};
+
+export type SubscriptionEntitlement = {
+  is_premium: boolean;
+  plan_id: string | null;
+  status: string | null;
+  current_period_end: string | null;
+  current_period_start?: string | null;
+  subscription_id: string | null;
+  cancel_at_cycle_end: boolean;
+  amount?: number | null;
+  currency?: string;
+};
+
+export type CreateSubscriptionResponse = {
+  ok: boolean;
+  subscription_id: string;
+  key_id: string;
+  plan: {
+    id: string;
+    name: string;
+    amount: number;
+    currency: string;
+    interval: string;
+  };
+  name: string;
+  description: string;
+  prefill: { email?: string; name?: string; contact?: string };
+  theme: { color: string };
+};
+
+export type VerifyPaymentResponse = {
+  ok: boolean;
+  verified: boolean;
+  status: string;
+  subscription: SubscriptionEntitlement;
+  payment_id: string;
+  amount?: number;
+  currency?: string;
+};
+
+export type PaymentHistoryItem = {
+  id?: string;
+  razorpay_payment_id: string;
+  razorpay_subscription_id?: string;
+  amount?: number;
+  currency?: string;
+  status?: string;
+  method?: string;
+  error_reason?: string;
+  created_at?: string;
+  plan_id?: string;
 };

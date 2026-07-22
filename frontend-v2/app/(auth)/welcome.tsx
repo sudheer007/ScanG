@@ -55,7 +55,12 @@ export default function WelcomeScreen() {
       await completeOnboarding(trimmed);
       router.replace('/(tabs)' as Href);
     } catch (e: any) {
-      setError(e?.message || 'Could not save your name');
+      const msg = e?.message || 'Could not save your name';
+      setError(
+        /reach|network|failed to fetch|API |Authentication|503|401/i.test(msg)
+          ? `${msg}. Make sure the backend is running and EXPO_PUBLIC_BACKEND_URL is correct.`
+          : msg,
+      );
     } finally {
       setBusy(false);
     }

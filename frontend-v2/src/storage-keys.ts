@@ -84,3 +84,42 @@ export const screenerSectorPref = {
     await storage.removeItem(SCREENER_SECTOR_KEY);
   },
 };
+
+const PORTFOLIO_KEY = 'radar.portfolio.v1';
+
+export type PortfolioItem = {
+  symbol: string;
+  market: 'US' | 'IN';
+  quantity: number;
+  avg_price: number;
+  name?: string;
+};
+
+export const portfolio = {
+  async list(): Promise<PortfolioItem[]> {
+    const raw = await storage.getItem(PORTFOLIO_KEY);
+    if (!raw) return [];
+    try {
+      return JSON.parse(raw) as PortfolioItem[];
+    } catch {
+      return [];
+    }
+  },
+  async replaceAll(items: PortfolioItem[]) {
+    await storage.setItem(PORTFOLIO_KEY, JSON.stringify(items));
+    return items;
+  },
+  async upsert(item: PortfolioItem) {
+    const list = await this.list();
+    const idx = list.findIndex((x) => x.symbol === item.symbol);
+    if (idx >= 0) list[idx] = item;
+    else list.push(item);
+    await storage.setItem(PORTFOLIO_KEY, JSON.stringify(list));
+    return list;
+  },
+  async remove(symbol: string) {
+    const list = (await this.list()).filter((x) => x.symbol !== symbol);
+    await storage.setItem(PORTFOLIO_KEY, JSON.stringify(list));
+    return list;
+  },
+};

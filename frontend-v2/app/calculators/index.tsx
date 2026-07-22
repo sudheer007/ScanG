@@ -75,9 +75,7 @@ export default function CalculatorsScreen() {
             <Ionicons name="chevron-back" size={22} color={theme.colors.text} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Calculators</Text>
-          <TouchableOpacity style={styles.iconBtn} accessibilityLabel="Calculator settings">
-            <Ionicons name="settings-outline" size={20} color={theme.colors.text} />
-          </TouchableOpacity>
+          <View style={styles.iconBtnGhost} />
         </View>
       </LinearGradient>
 
@@ -157,6 +155,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: theme.colors.border,
+  },
+  iconBtnGhost: {
+    width: 40,
+    height: 40,
   },
   scroll: {
     paddingHorizontal: theme.spacing.lg,

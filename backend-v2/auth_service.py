@@ -34,9 +34,16 @@ def _init_firebase() -> None:
         firebase_admin.initialize_app(cred)
         log.info("Firebase Admin initialized from FIREBASE_CREDENTIALS_JSON")
     elif creds_path:
-        cred = credentials.Certificate(creds_path)
-        firebase_admin.initialize_app(cred)
-        log.info("Firebase Admin initialized from GOOGLE_APPLICATION_CREDENTIALS")
+        if not os.path.isfile(creds_path):
+            log.error("Firebase credentials file not found: %s", creds_path)
+            return
+        try:
+            cred = credentials.Certificate(creds_path)
+            firebase_admin.initialize_app(cred)
+            log.info("Firebase Admin initialized from GOOGLE_APPLICATION_CREDENTIALS")
+        except Exception as exc:
+            log.error("Failed to load Firebase credentials from %s: %s", creds_path, exc)
+            return
     else:
         log.warning(
             "Firebase Admin not configured; set FIREBASE_CREDENTIALS_JSON or "
