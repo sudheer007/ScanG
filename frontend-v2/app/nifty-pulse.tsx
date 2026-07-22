@@ -29,7 +29,7 @@ const HORIZON_OPTIONS: { value: Horizon; label: string }[] = [
   { value: '60', label: '1m' },
 ];
 
-const POLL_MS = 1500;
+const POLL_MS = 5000; // match slower backend Yahoo poll; was 1.5s
 const SPARK_WIDTH = Math.min(Dimensions.get('window').width - 48, 360);
 
 function directionTone(d: NiftyDirection): 'pos' | 'neg' | 'neutral' {

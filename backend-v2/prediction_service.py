@@ -46,7 +46,8 @@ ETF_SYMBOL = "NIFTYBEES.NS"
 BASKET_SYMBOLS = [SYMBOL, BANK_SYMBOL, VIX_SYMBOL, ETF_SYMBOL]
 
 HORIZONS = (5, 10, 15, 30, 60)
-POLL_INTERVAL_SEC = 1.5
+POLL_INTERVAL_SEC = 5.0  # open session: Yahoo basket poll (was 1.5s — too aggressive on Render)
+POLL_INTERVAL_CLOSED_SEC = 300.0  # 5 min when NSE closed — skip hammering Yahoo
 BUFFER_MAX_TICKS = 300  # ~7.5 min at 1.5s
 HISTORY_MAX = 200
 DISCLAIMER = (
@@ -571,15 +572,24 @@ async def _poll_once() -> None:
 
 
 async def _poll_loop() -> None:
-    log.info("Nifty prediction poller started (%ss interval, basket=%s)", POLL_INTERVAL_SEC, BASKET_SYMBOLS)
+    log.info(
+        "Nifty prediction poller started (open=%ss, closed=%ss, basket=%s)",
+        POLL_INTERVAL_SEC,
+        POLL_INTERVAL_CLOSED_SEC,
+        BASKET_SYMBOLS,
+    )
     while True:
+        sleep_sec = POLL_INTERVAL_SEC
         try:
-            await _poll_once()
+            if _nse_session_status() == "open":
+                await _poll_once()
+            else:
+                sleep_sec = POLL_INTERVAL_CLOSED_SEC
         except asyncio.CancelledError:
             raise
         except Exception as e:
             log.warning("nifty poll loop error: %s", e)
-        await asyncio.sleep(POLL_INTERVAL_SEC)
+        await asyncio.sleep(sleep_sec)
 
 
 def start_poller() -> None:

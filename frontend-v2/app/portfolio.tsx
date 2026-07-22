@@ -53,7 +53,7 @@ type HoldingRow = PortfolioItem & {
 
 const ALLOWED_EXTENSIONS = ['.csv', '.tsv', '.txt', '.pdf', '.jpg', '.jpeg', '.png', '.webp'];
 /** Auto-refresh LTP / P&L while the portfolio screen is focused. */
-const QUOTE_POLL_MS = 60_000;
+const QUOTE_POLL_MS = 5 * 60_000; // 5 min — reduces Yahoo quote pressure vs 1 min
 
 function isAllowedFile(name: string): boolean {
   const lower = name.toLowerCase();
