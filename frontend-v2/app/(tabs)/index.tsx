@@ -68,8 +68,17 @@ export default function MarketsScreen() {
         }).catch(() => { /* sectors are secondary on overview */ });
         return;
       } else if (t === 'movers') {
-        const [ov, ma] = await Promise.all([api.marketOverview(m, force), api.discoverMostActive(m, force)]);
-        setGainers(ov.gainers || []); setLosers(ov.losers || []); setMostActive(ma.stocks || []);
+        // Overview is fast/cached; most-active uses lite path when universe is cold.
+        const ov = await api.marketOverview(m, force);
+        setGainers(ov.gainers || []);
+        setLosers(ov.losers || []);
+        setLoading(false);
+        setRefreshing(false);
+        loadedRef.current.add(`${m}:${t}`);
+        void api.discoverMostActive(m, force).then((ma) => {
+          setMostActive(ma.stocks || []);
+        }).catch(() => { /* keep gainers/losers visible */ });
+        return;
       } else if (t === 'sectors') {
         const sec = await api.discoverSectorRotation(m, force);
         setSectors(sec.sectors || []);

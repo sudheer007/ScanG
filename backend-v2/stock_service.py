@@ -32,13 +32,27 @@ from ingestion.data_access import (
 
 log = logging.getLogger(__name__)
 
-# Caches
-QUOTE_BATCH_CACHE = TTLCache(maxsize=4, ttl=120)             # 2 min for full quote batch
-CHART_CACHE = TTLCache(maxsize=4000, ttl=300)                # 5 min charts
-SUMMARY_CACHE = TTLCache(maxsize=4000, ttl=60 * 60)          # 60 min fundamentals
-HISTORY_CACHE = TTLCache(maxsize=2000, ttl=5 * 60)           # 5 min OHLCV history
-BUNDLE_CACHE = TTLCache(maxsize=4000, ttl=120)
-UNIVERSE_BUNDLE_CACHE = TTLCache(maxsize=4, ttl=120)
+# Caches — longer TTLs reduce Yahoo fan-out on Render after cold wake.
+# Summary/chart layers are already long-lived; universe rebuilds mostly reassemble them.
+QUOTE_BATCH_CACHE = TTLCache(maxsize=8, ttl=5 * 60)          # 5 min for full quote batch
+CHART_CACHE = TTLCache(maxsize=4000, ttl=10 * 60)             # 10 min charts
+SUMMARY_CACHE = TTLCache(maxsize=4000, ttl=60 * 60)           # 60 min fundamentals
+HISTORY_CACHE = TTLCache(maxsize=2000, ttl=5 * 60)            # 5 min OHLCV history
+BUNDLE_CACHE = TTLCache(maxsize=4000, ttl=10 * 60)            # 10 min per-symbol
+UNIVERSE_BUNDLE_CACHE = TTLCache(maxsize=8, ttl=8 * 60)       # 8 min full market (Discover/Radar/Screener)
+OVERVIEW_CACHE = TTLCache(maxsize=8, ttl=90)                  # 90s Markets landing
+
+# Single-flight: concurrent callers share one in-progress universe build per market.
+_universe_inflight: Dict[str, "asyncio.Future[List[Dict[str, Any]]]"] = {}
+_universe_inflight_lock: Optional[asyncio.Lock] = None
+
+
+def _universe_lock() -> asyncio.Lock:
+    global _universe_inflight_lock
+    if _universe_inflight_lock is None:
+        _universe_inflight_lock = asyncio.Lock()
+    return _universe_inflight_lock
+
 
 _session_lock = threading.Lock()
 _session: Optional[cffi_req.Session] = None
@@ -624,15 +638,8 @@ async def get_bundle(symbol: str) -> Dict[str, Any]:
     return b
 
 
-async def get_market_universe(market: str) -> List[Dict[str, Any]]:
-    """Fetch full universe bundles, fast (uses batch quote + parallel chart + summary).
-
-    Universe TTL is short (2 min), but chart_layer/summary_layer caches are reused.
-    """
-    key = f"universe_full:{market.upper()}"
-    if key in UNIVERSE_BUNDLE_CACHE:
-        return UNIVERSE_BUNDLE_CACHE[key]
-
+async def _build_market_universe(market: str) -> List[Dict[str, Any]]:
+    """Heavy path: batch quotes + parallel chart/summary + Mongo enrichment."""
     symbols = get_universe(market)
 
     # 1) Batch quotes (fast — ~1-3 calls)
@@ -663,8 +670,53 @@ async def get_market_universe(market: str) -> List[Dict[str, Any]]:
         BUNDLE_CACHE[sym] = b
         bundles.append(b)
 
-    UNIVERSE_BUNDLE_CACHE[key] = bundles
     return bundles
+
+
+async def get_market_universe(market: str) -> List[Dict[str, Any]]:
+    """Fetch full universe bundles (batch quote + parallel chart + summary).
+
+    Concurrent callers for the same market share one in-flight build (single-flight)
+    so prewarm + Markets overview + Discover do not triple-hit Yahoo.
+    """
+    key = f"universe_full:{market.upper()}"
+    if key in UNIVERSE_BUNDLE_CACHE:
+        return UNIVERSE_BUNDLE_CACHE[key]
+
+    async with _universe_lock():
+        if key in UNIVERSE_BUNDLE_CACHE:
+            return UNIVERSE_BUNDLE_CACHE[key]
+        existing = _universe_inflight.get(key)
+        if existing is not None and not existing.done():
+            fut = existing
+        else:
+            loop = asyncio.get_running_loop()
+            fut = loop.create_future()
+            _universe_inflight[key] = fut
+
+            async def _run() -> None:
+                try:
+                    bundles = await _build_market_universe(market)
+                    UNIVERSE_BUNDLE_CACHE[key] = bundles
+                    if not fut.done():
+                        fut.set_result(bundles)
+                except Exception as e:
+                    if not fut.done():
+                        fut.set_exception(e)
+                finally:
+                    # Clear inflight only if we still own this future.
+                    async with _universe_lock():
+                        if _universe_inflight.get(key) is fut:
+                            _universe_inflight.pop(key, None)
+
+            asyncio.create_task(_run())
+
+    return await fut
+
+
+def universe_cache_warm(market: str) -> bool:
+    """True when a full universe bundle is already cached for this market."""
+    return f"universe_full:{market.upper()}" in UNIVERSE_BUNDLE_CACHE
 
 
 async def get_quote(symbol: str) -> Dict[str, Any]:
@@ -1028,8 +1080,38 @@ async def get_movers_lite(market: str, mover_type: str = "gainers", limit: int =
     return out
 
 
+async def get_most_active_lite(market: str, limit: int = 25) -> List[Dict[str, Any]]:
+    """Fast most-active from quote volume ratio + sparklines for top N only."""
+    symbols = get_universe(market)
+    quote_map = await asyncio.to_thread(_yh_quote_batch, symbols)
+    ranked: List[tuple] = []
+    for sym in symbols:
+        q = quote_map.get(sym) or {}
+        vol = _safe(q.get("regularMarketVolume"))
+        avg = _safe(q.get("averageDailyVolume3Month"))
+        if vol is None:
+            continue
+        surge = (vol / avg) if avg and avg > 0 else vol
+        ranked.append((sym, q, surge))
+    ranked.sort(key=lambda x: x[2], reverse=True)
+    top = ranked[:limit]
+    top_syms = [sym for sym, _, _ in top]
+    chart_results = await _gather_with_concurrency(top_syms, _fetch_chart_layer, concurrency=20)
+    out: List[Dict[str, Any]] = []
+    for (sym, q, surge), cl in zip(top, chart_results):
+        row = _quote_to_lite_stock(sym, q, (cl or {}).get("sparkline") or [])
+        row["volume_surge"] = round(float(surge), 2) if surge is not None else None
+        out.append(row)
+    return out
+
+
 async def get_markets_overview_fast(market: str, limit: int = 10) -> Dict[str, Any]:
     """Markets landing payload without waiting on full-universe enrichment."""
+    cache_key = f"overview:{market.upper()}:{limit}"
+    cached = OVERVIEW_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
     symbols = get_universe(market)
     idx_map = get_indices(market)
     idx_syms = list(idx_map.keys())
@@ -1058,13 +1140,15 @@ async def get_markets_overview_fast(market: str, limit: int = 10) -> Dict[str, A
     gainers = [_quote_to_lite_stock(sym, q, spark_map.get(sym, [])) for sym, q, _ in gainers_src]
     losers = [_quote_to_lite_stock(sym, q, spark_map.get(sym, [])) for sym, q, _ in losers_src]
 
-    return {
+    out = {
         "market": market.upper(),
         "currency": currency(market),
         "indices": idx_quotes,
         "gainers": gainers,
         "losers": losers,
     }
+    OVERVIEW_CACHE[cache_key] = out
+    return out
 
 
 def custom_screen(stocks: List[Dict[str, Any]], filters: Dict[str, Any]) -> List[Dict[str, Any]]:

@@ -83,6 +83,21 @@ Copy values from local [`frontend-v2/.env`](frontend-v2/.env.example) / Firebase
 
 **Free tier:** the API may sleep when idle; the first request can take ~30–60s.
 
+### Keep the API awake (strongly recommended)
+
+Render free web services sleep after ~15 minutes with no traffic. That cold start is the main reason live users see a blank/slow Markets screen.
+
+1. After deploy, copy your API health URL: `https://scang-api-xxxx.onrender.com/api/health`
+2. Create a free job at [cron-job.org](https://cron-job.org) (or UptimeRobot):
+   - Method: `GET`
+   - URL: the health URL above
+   - Interval: every **10–14 minutes**
+3. Optional: enable the GitHub Action [`.github/workflows/keep-api-warm.yml`](.github/workflows/keep-api-warm.yml) and set repo secret `SCANG_API_HEALTH_URL` to the same health URL.
+
+While the process is awake, the backend now keeps Markets overview caches warm and builds the full stock universe once (shared across Discover / Radar / Screener) so stock lists appear much faster.
+
+Upgrading the API off free tier also removes sleep entirely (uses the 750 free hours only if you stay on free).
+
 ### Manual deploy (without Blueprint)
 
 - **API:** New → Web Service → Docker → root directory `backend-v2` → set env vars above → start via Dockerfile `CMD`.

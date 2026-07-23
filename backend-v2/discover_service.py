@@ -9,7 +9,14 @@ import math
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from stock_service import get_market_universe, RADAR_STRATEGIES, _apply_strategy, get_movers
+from stock_service import (
+    get_market_universe,
+    RADAR_STRATEGIES,
+    _apply_strategy,
+    get_movers,
+    get_most_active_lite,
+    universe_cache_warm,
+)
 from stock_universe import currency
 
 
@@ -581,13 +588,19 @@ async def investor_picks(market: str, limit: int = 12) -> Dict[str, Any]:
 # 7. Most Active (by volume surge proxy)
 # -------------------------------------------------------------------
 async def most_active(market: str, limit: int = 25) -> Dict[str, Any]:
-    universe = await get_market_universe(market)
-    rows = [x for x in universe if (x.get("volume_surge") is not None)]
-    rows.sort(key=lambda x: x.get("volume_surge") or 0, reverse=True)
+    # Prefer warm full universe (has chart-based volume_surge). Otherwise lite
+    # quote-volume path so Markets movers does not wait on full enrichment.
+    if universe_cache_warm(market):
+        universe = await get_market_universe(market)
+        rows = [x for x in universe if (x.get("volume_surge") is not None)]
+        rows.sort(key=lambda x: x.get("volume_surge") or 0, reverse=True)
+        stocks = rows[:limit]
+    else:
+        stocks = await get_most_active_lite(market, limit)
     return {
         "market": market.upper(),
         "currency": currency(market),
-        "stocks": rows[:limit],
+        "stocks": stocks,
     }
 
 

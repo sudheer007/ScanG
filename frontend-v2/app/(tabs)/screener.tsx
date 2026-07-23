@@ -84,6 +84,13 @@ export default function ScreenerScreen() {
 
   const clearAll = () => { setFilters({}); setActivePreset(null); };
 
+  const goBack = () => {
+    setMode('quick');
+    setFilters({});
+    setActivePreset(null);
+    setSheetOpen(false);
+  };
+
   const removeFilter = (key: string) => {
     const next = { ...filters }; delete (next as any)[key];
     setFilters(next); setActivePreset(null);
@@ -115,13 +122,28 @@ export default function ScreenerScreen() {
     if (m === 'custom' && !hasFilters) setTimeout(() => setSheetOpen(true), 150);
   };
 
+  const customTitle = activePreset
+    ? PRESETS.find((p) => p.id === activePreset)?.name
+    : filters.sector
+      ? String(filters.sector)
+      : hasFilters
+        ? 'Custom screen'
+        : 'Custom';
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']} testID="screener-screen">
       <View style={styles.header}>
+        {mode === 'custom' && (
+          <TouchableOpacity onPress={goBack} style={styles.iconBtn} testID="screener-back">
+            <Ionicons name="arrow-back" size={20} color={theme.colors.text} />
+          </TouchableOpacity>
+        )}
         <View style={{ flex: 1 }}>
-          <Text style={styles.title}>Screener</Text>
+          <Text style={styles.title}>{mode === 'custom' ? customTitle : 'Screener'}</Text>
           <Text style={styles.subtitle}>
-            {hasFilters ? `${results.length} matches` : `${universe.length} stocks`} • {market} • {AVAILABLE_COUNT}+ metrics
+            {mode === 'custom'
+              ? `${results.length} of ${universe.length} stocks • ${market}`
+              : `${hasFilters ? `${results.length} matches` : `${universe.length} stocks`} • ${market} • ${AVAILABLE_COUNT}+ metrics`}
           </Text>
         </View>
         <TouchableOpacity testID="open-filters" onPress={() => setSheetOpen(true)} style={styles.iconBtn}>
@@ -140,11 +162,13 @@ export default function ScreenerScreen() {
         onChange={(v) => { setMarket(v as Market); marketPref.set(v as Market); }}
       />
 
-      {/* Mode segmented control */}
-      <View style={styles.segment}>
-        <SegBtn icon="flash" label="Quick Screens" active={mode === 'quick'} onPress={() => onModeChange('quick')} testID="mode-quick" />
-        <SegBtn icon="construct" label="Custom" active={mode === 'custom'} onPress={() => onModeChange('custom')} testID="mode-custom" />
-      </View>
+      {/* Mode segmented control — hide on custom results to match Radar detail focus */}
+      {mode === 'quick' && (
+        <View style={styles.segment}>
+          <SegBtn icon="flash" label="Quick Screens" active={mode === 'quick'} onPress={() => onModeChange('quick')} testID="mode-quick" />
+          <SegBtn icon="construct" label="Custom" active={mode === 'custom'} onPress={() => onModeChange('custom')} testID="mode-custom" />
+        </View>
+      )}
 
       {loading ? (
         <LoadingState label="Loading universe…" />
@@ -175,16 +199,10 @@ export default function ScreenerScreen() {
           {/* Active summary bar */}
           <View style={styles.summaryBar}>
             <View style={{ flex: 1 }}>
+              <Text style={styles.summarySub}>{hasFilters ? 'Active filters' : 'No filters yet'}</Text>
               <Text style={styles.summaryTitle} numberOfLines={1}>
-                {activePreset
-                  ? PRESETS.find((p) => p.id === activePreset)?.name
-                  : filters.sector
-                    ? String(filters.sector)
-                    : hasFilters
-                      ? 'Custom screen'
-                      : 'No filters'}
+                {hasFilters ? `${Object.keys(filters).length} filter${Object.keys(filters).length === 1 ? '' : 's'} applied` : 'Tap Edit to add filters'}
               </Text>
-              <Text style={styles.summarySub}>{results.length} of {universe.length} stocks</Text>
             </View>
             <TouchableOpacity testID="edit-filters" onPress={() => setSheetOpen(true)} style={styles.editBtn}>
               <Ionicons name="options-outline" size={15} color={theme.colors.text} />
@@ -211,11 +229,15 @@ export default function ScreenerScreen() {
 
           {/* Results */}
           {!hasFilters ? (
-            <EmptyState title="Build your screen" subtitle="Tap Edit to add filters, or switch to Quick Screens." />
+            <EmptyState title="Build your screen" subtitle="Tap Edit to add filters, or go back to Quick Screens." />
           ) : results.length === 0 ? (
             <EmptyState title="No matches" subtitle="Try loosening your filters." />
           ) : (
-            <View style={{ flex: 1, paddingHorizontal: theme.spacing.sm }}>
+            <ScrollView
+              style={{ flex: 1 }}
+              contentContainerStyle={{ paddingHorizontal: theme.spacing.sm, paddingBottom: 120 }}
+              showsVerticalScrollIndicator
+            >
               <SortableDataTable
                 testID="screener-table"
                 columns={columns}
@@ -224,7 +246,7 @@ export default function ScreenerScreen() {
                 stickyField="symbol"
                 stickyWidth={90}
               />
-            </View>
+            </ScrollView>
           )}
         </View>
       )}

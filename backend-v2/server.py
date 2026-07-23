@@ -188,7 +188,14 @@ async def root():
 
 @api_router.get("/health")
 async def health():
-    return {"status": "ok", "ts": datetime.now(timezone.utc).isoformat()}
+    return {
+        "status": "ok",
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "cache": {
+            "us_universe": ss.universe_cache_warm("US"),
+            "in_universe": ss.universe_cache_warm("IN"),
+        },
+    }
 
 
 # ---------- Markets ----------
@@ -216,8 +223,8 @@ async def markets_overview(market: str = Query("US")):
     overview = await ss.get_markets_overview_fast(market, limit=10)
 
     # Warm the full universe in the background for Radar / Screener / sectors.
-    key = f"universe_full:{market.upper()}"
-    if key not in ss.UNIVERSE_BUNDLE_CACHE:
+    # Single-flight inside get_market_universe prevents duplicate Yahoo storms.
+    if not ss.universe_cache_warm(market):
         asyncio.create_task(ss.get_market_universe(market))
 
     return overview
@@ -430,6 +437,7 @@ async def predict_nifty(
             status_code=400,
             detail=f"horizon must be one of {list(pred.HORIZONS)}",
         )
+    pred.start_poller()
     return await pred.get_prediction(horizon)
 
 
@@ -439,12 +447,14 @@ async def predict_nifty_history(
     request: Request,
     limit: int = Query(50, ge=1, le=200),
 ):
+    pred.start_poller()
     return pred.get_history(limit)
 
 
 @api_router.get("/predict/nifty/stats")
 @limiter.limit("30/minute")
 async def predict_nifty_stats(request: Request):
+    pred.start_poller()
     return pred.get_stats()
 
 
@@ -1142,23 +1152,52 @@ logger = logging.getLogger(__name__)
 
 @app.on_event("startup")
 async def prewarm():
-    """Pre-warm caches so the first Markets screen load is fast."""
-    import asyncio
+    """Pre-warm caches so the first Markets screen load is fast.
 
-    pred.start_poller()
+    Order matters on Render cold wake:
+    1) US Markets overview (what users see first)
+    2) US full universe (Discover / Radar / Screener)
+    3) IN universe after a short gap (avoid Yahoo contention)
+    Prediction poller starts only after warm-up (or on first /predict call).
+    """
+    import asyncio
 
     async def _warm():
         try:
-            # Quote+index path first (what /markets/overview needs), then full universe.
             await ss.get_markets_overview_fast("US", limit=10)
             logger.info("Markets overview cache prewarmed for US")
             await ss.get_market_universe("US")
+            logger.info("Universe cache prewarmed for US")
+            await asyncio.sleep(2)
+            await ss.get_markets_overview_fast("IN", limit=10)
             await ss.get_market_universe("IN")
-            logger.info("Universe cache prewarmed for US + IN")
+            logger.info("Universe cache prewarmed for IN")
         except Exception as e:
             logger.warning(f"prewarm failed: {e}")
+        finally:
+            # Start after warm-up so poller does not compete with first-load Yahoo traffic.
+            try:
+                pred.start_poller()
+            except Exception as e:
+                logger.warning(f"prediction poller start failed: {e}")
+
+    async def _keep_warm():
+        """While the process is awake, refresh overview before caches go cold."""
+        await asyncio.sleep(60)
+        while True:
+            try:
+                await ss.get_markets_overview_fast("US", limit=10)
+                if not ss.universe_cache_warm("US"):
+                    asyncio.create_task(ss.get_market_universe("US"))
+                await ss.get_markets_overview_fast("IN", limit=10)
+                if not ss.universe_cache_warm("IN"):
+                    asyncio.create_task(ss.get_market_universe("IN"))
+            except Exception as e:
+                logger.warning(f"keep-warm refresh failed: {e}")
+            await asyncio.sleep(75)
 
     asyncio.create_task(_warm())
+    asyncio.create_task(_keep_warm())
 
 
 @app.on_event("shutdown")

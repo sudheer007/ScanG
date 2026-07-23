@@ -394,29 +394,36 @@ export interface NiftyPredictStatsResponse {
 
 export const api = {
   health: () => http('/health'),
+  /** Fire-and-forget wake for Render cold starts — call on app mount. */
+  wakeBackend: () => {
+    void http('/health').catch(() => undefined);
+  },
   peek,
   marketOverview: (market: Market, force = false) =>
     cget<{ market: Market; currency: string; indices: IndexQuote[]; gainers: Stock[]; losers: Stock[] }>(
-      `/markets/overview?market=${market}`, 60000, force, true,
+      `/markets/overview?market=${market}`, 90000, force, true,
     ),
-  indices: (market: Market, force = false) => cget<{ indices: IndexQuote[]; currency: string }>(`/markets/indices?market=${market}`, 60000, force),
+  indices: (market: Market, force = false) => cget<{ indices: IndexQuote[]; currency: string }>(`/markets/indices?market=${market}`, 90000, force),
   movers: (market: Market, type: 'gainers' | 'losers' = 'gainers', limit = 15, force = false) =>
-    cget<{ stocks: Stock[] }>(`/markets/movers?market=${market}&type=${type}&limit=${limit}`, 60000, force),
-  stock: (symbol: string, force = false) => cget<Stock>(`/stocks/${encodeURIComponent(symbol)}`, 120000, force),
+    cget<{ stocks: Stock[] }>(`/markets/movers?market=${market}&type=${type}&limit=${limit}`, 90000, force, true),
+  stock: (symbol: string, force = false) => cget<Stock>(`/stocks/${encodeURIComponent(symbol)}`, 180000, force),
   stockEvents: (symbol: string, force = false) => cget<StockEvents>(`/stocks/${encodeURIComponent(symbol)}/events`, 1800000, force),
   history: (symbol: string, period = '6mo', interval = '1d', force = false) =>
-    cget<{ points: HistoryPoint[] }>(`/stocks/${encodeURIComponent(symbol)}/history?period=${period}&interval=${interval}`, 180000, force),
+    cget<{ points: HistoryPoint[] }>(`/stocks/${encodeURIComponent(symbol)}/history?period=${period}&interval=${interval}`, 300000, force),
   batchQuotes: (symbols: string[]) =>
     http<{ quotes: Stock[] }>(`/stocks/batch/quotes?symbols=${encodeURIComponent(symbols.join(','))}`),
-  strategies: () => cget<{ strategies: Strategy[] }>(`/radar/strategies`, 3600000),
-  radar: (strategy: string, market: Market, force = false) => cget<RadarResult>(`/radar/${strategy}?market=${market}`, 120000, force),
+  strategies: () => cget<{ strategies: Strategy[] }>(`/radar/strategies`, 3600000, false, true),
+  radar: (strategy: string, market: Market, force = false) =>
+    cget<RadarResult>(`/radar/${strategy}?market=${market}`, 300000, force, true),
   customScreen: (body: { market: Market; filters: Record<string, any>; sort_by?: string; sort_desc?: boolean; limit?: number }) =>
     http<{ count: number; stocks: Stock[]; currency: string }>(`/screener/custom`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),
   screenerUniverse: (market: Market, force = false) =>
-    cget<{ market: Market; currency: string; count: number; stocks: Stock[] }>(`/screener/universe?market=${market}`, 120000, force),
+    cget<{ market: Market; currency: string; count: number; stocks: Stock[] }>(
+      `/screener/universe?market=${market}`, 300000, force, true,
+    ),
   search: (q: string) =>
     http<{ results: { symbol: string; name: string; market: Market; price: number; change_pct: number; currency: string }[] }>(
       `/search?q=${encodeURIComponent(q)}`,
@@ -427,19 +434,26 @@ export const api = {
   newsStock: (symbol: string, force = false, limit = 20) =>
     cget<{ symbol: string; count: number; news: NewsItem[] }>(`/news/stock/${encodeURIComponent(symbol)}?limit=${limit}`, 600000, force),
   // ---- Discover ----
-  discoverFeed: (market: Market, force = false) => cget<any>(`/discover/feed?market=${market}`, 120000, force),
-  discoverAiPicks: (market: Market, force = false) => cget<any>(`/discover/ai-picks?market=${market}`, 120000, force),
-  discoverEvents: (market: Market, force = false) => cget<any>(`/discover/events?market=${market}`, 120000, force),
-  discoverAnalystRatings: (market: Market, force = false) => cget<any>(`/discover/analyst-ratings?market=${market}`, 120000, force),
-  discoverPopularScreeners: (market: Market, force = false) => cget<any>(`/discover/popular-screeners?market=${market}`, 120000, force),
-  discoverValuation: (market: Market, force = false) => cget<any>(`/discover/valuation?market=${market}`, 120000, force),
-  discoverInvestorPicks: (market: Market, force = false) => cget<any>(`/discover/investor-picks?market=${market}`, 120000, force),
-  discoverMostActive: (market: Market, force = false) => cget<any>(`/discover/most-active?market=${market}`, 60000, force),
-  discoverWinnersLosers: (market: Market, force = false) => cget<any>(`/discover/winners-losers?market=${market}`, 60000, force),
-  discoverForecast: (market: Market, force = false) => cget<any>(`/discover/forecast?market=${market}`, 120000, force),
-  discoverEarningsCalendar: (market: Market, force = false) => cget<any>(`/discover/earnings-calendar?market=${market}`, 300000, force),
-  discoverDividendCalendar: (market: Market, force = false) => cget<any>(`/discover/dividend-calendar?market=${market}`, 300000, force),
-  discoverSectorRotation: (market: Market, force = false) => cget<{ market: Market; currency: string; sectors: SectorRow[] }>(`/discover/sector-rotation?market=${market}`, 120000, force),
+  discoverFeed: (market: Market, force = false) =>
+    cget<any>(`/discover/feed?market=${market}`, 300000, force, true),
+  discoverAiPicks: (market: Market, force = false) => cget<any>(`/discover/ai-picks?market=${market}`, 300000, force),
+  discoverEvents: (market: Market, force = false) => cget<any>(`/discover/events?market=${market}`, 300000, force),
+  discoverAnalystRatings: (market: Market, force = false) => cget<any>(`/discover/analyst-ratings?market=${market}`, 300000, force),
+  discoverPopularScreeners: (market: Market, force = false) => cget<any>(`/discover/popular-screeners?market=${market}`, 300000, force),
+  discoverValuation: (market: Market, force = false) => cget<any>(`/discover/valuation?market=${market}`, 300000, force),
+  discoverInvestorPicks: (market: Market, force = false) => cget<any>(`/discover/investor-picks?market=${market}`, 300000, force),
+  discoverMostActive: (market: Market, force = false) =>
+    cget<any>(`/discover/most-active?market=${market}`, 90000, force, true),
+  discoverWinnersLosers: (market: Market, force = false) => cget<any>(`/discover/winners-losers?market=${market}`, 90000, force),
+  discoverForecast: (market: Market, force = false) => cget<any>(`/discover/forecast?market=${market}`, 300000, force),
+  discoverEarningsCalendar: (market: Market, force = false) =>
+    cget<any>(`/discover/earnings-calendar?market=${market}`, 300000, force, true),
+  discoverDividendCalendar: (market: Market, force = false) =>
+    cget<any>(`/discover/dividend-calendar?market=${market}`, 300000, force, true),
+  discoverSectorRotation: (market: Market, force = false) =>
+    cget<{ market: Market; currency: string; sectors: SectorRow[] }>(
+      `/discover/sector-rotation?market=${market}`, 300000, force, true,
+    ),
   discoverInstitutional: (market: Market, force = false) => cget<any>(`/discover/institutional-activity?market=${market}`, 300000, force),
   analyzer: (symbol: string, force = false) => cget<import('@/src/types/analyzer').AnalyzerResult>(`/analyzer/${encodeURIComponent(symbol)}`, 300000, force),
 

@@ -38,3 +38,4 @@ pytesseract==0.3.13
 # razorpay 2.x dropped pkg_resources (removed in setuptools 82). Keep 1.4.2 + setuptools<82
 # only if you cannot upgrade; 2.0.0+ is the correct fix on Render/Python 3.12.
 razorpay==2.0.0
+ 

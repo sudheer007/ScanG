@@ -72,8 +72,15 @@ export default function RadarScreen() {
 
   const runStrategy = useCallback(async (key: string, m: Market) => {
     setActive(key);
-    setLoading(true);
     setError(null);
+    const path = `/radar/${key}?market=${m}`;
+    const cached = await api.peek<RadarResult>(path, true);
+    if (cached?.stocks) {
+      setResult(cached);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
     try {
       const r = await api.radar(key, m);
       setResult(r);
@@ -227,18 +234,20 @@ export default function RadarScreen() {
           <Text style={styles.strategyDescription}>{result.subtitle}</Text>
           <ScrollView
             style={{ flex: 1 }}
-            contentContainerStyle={{ paddingHorizontal: theme.spacing.sm, paddingBottom: 120 }}
+            contentContainerStyle={{ paddingBottom: 120, flexGrow: 1 }}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.text} />}
           >
-            <SortableDataTable
-              testID="radar-table"
-              columns={columns}
-              rows={result.stocks}
-              linkToStockField="symbol"
-              stickyField="symbol"
-              stickyWidth={94}
-              defaultSort={{ key: 'rating', desc: true }}
-            />
+            <View style={{ paddingHorizontal: theme.spacing.sm, width: '100%' }}>
+              <SortableDataTable
+                testID="radar-table"
+                columns={columns}
+                rows={result.stocks}
+                linkToStockField="symbol"
+                stickyField="symbol"
+                stickyWidth={94}
+                defaultSort={{ key: 'rating', desc: true }}
+              />
+            </View>
           </ScrollView>
         </View>
       )}

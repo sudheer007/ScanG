@@ -9,6 +9,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, type Href } from 'expo-router';
@@ -19,9 +20,13 @@ import { authTheme } from '@/src/auth/authTheme';
 import { ONBOARDING } from '@/constants/testIds/auth';
 
 const NAME_MAX = 50;
+const FORM_MAX = 420;
+const LAPTOP_MIN = 768;
 
 export default function WelcomeScreen() {
   const router = useRouter();
+  const { width } = useWindowDimensions();
+  const isLaptop = width >= LAPTOP_MIN;
   const { user, profile, needsOnboarding, completeOnboarding } = useAuth();
   const suggestedName = useMemo(() => {
     const fromProfile = profile?.display_name?.trim();
@@ -75,58 +80,60 @@ export default function WelcomeScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView
-          contentContainerStyle={styles.scroll}
+          contentContainerStyle={[styles.scroll, isLaptop && styles.scrollLaptop]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.center}>
-            <Text style={styles.emoji} accessibilityLabel="Wave hello">
-              👋
-            </Text>
+          <View style={[styles.form, isLaptop && styles.formLaptop]}>
+            <View style={styles.center}>
+              <Text style={styles.emoji} accessibilityLabel="Wave hello">
+                👋
+              </Text>
 
-            <Text style={styles.welcomeLine}>Welcome to the</Text>
-            <Text style={styles.accentLine}>future of finance</Text>
+              <Text style={styles.welcomeLine}>Welcome to the</Text>
+              <Text style={styles.accentLine}>future of finance</Text>
 
-            <Text style={styles.question}>What's your name?</Text>
+              <Text style={styles.question}>What's your name?</Text>
 
-            <TextInput
-              testID={ONBOARDING.nameInput}
-              style={styles.input}
-              value={name}
-              onChangeText={(text) => {
-                setName(text.slice(0, NAME_MAX));
-                if (error) setError(null);
-              }}
-              placeholder="Enter your name"
-              placeholderTextColor="#A3A3A3"
-              autoCapitalize="words"
-              autoCorrect={false}
-              maxLength={NAME_MAX}
-              returnKeyType="done"
-              onSubmitEditing={onComplete}
-            />
-            <Text style={styles.counter}>
-              {name.length}/{NAME_MAX}
-            </Text>
+              <TextInput
+                testID={ONBOARDING.nameInput}
+                style={styles.input}
+                value={name}
+                onChangeText={(text) => {
+                  setName(text.slice(0, NAME_MAX));
+                  if (error) setError(null);
+                }}
+                placeholder="Enter your name"
+                placeholderTextColor="#A3A3A3"
+                autoCapitalize="words"
+                autoCorrect={false}
+                maxLength={NAME_MAX}
+                returnKeyType="done"
+                onSubmitEditing={onComplete}
+              />
+              <Text style={styles.counter}>
+                {name.length}/{NAME_MAX}
+              </Text>
 
-            {error ? <Text style={styles.error}>{error}</Text> : null}
+              {error ? <Text style={styles.error}>{error}</Text> : null}
+            </View>
+
+            <Pressable
+              testID={ONBOARDING.completeButton}
+              style={[styles.button, !canSubmit && styles.buttonDisabled]}
+              onPress={onComplete}
+              disabled={!canSubmit}
+            >
+              {busy ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <View style={styles.buttonRow}>
+                  <Text style={styles.buttonText}>Complete</Text>
+                  <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
+                </View>
+              )}
+            </Pressable>
           </View>
-
-          <Pressable
-            testID={ONBOARDING.completeButton}
-            style={[styles.button, !canSubmit && styles.buttonDisabled]}
-            onPress={onComplete}
-            disabled={!canSubmit}
-          >
-            {busy ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <View style={styles.buttonRow}>
-                <Text style={styles.buttonText}>Complete</Text>
-                <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
-              </View>
-            )}
-          </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -141,11 +148,30 @@ const styles = StyleSheet.create({
     paddingHorizontal: 28,
     paddingTop: 56,
     paddingBottom: 24,
+  },
+  scrollLaptop: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingTop: 40,
+    paddingBottom: 40,
+  },
+  form: {
+    flexGrow: 1,
+    width: '100%',
     justifyContent: 'space-between',
+  },
+  formLaptop: {
+    flexGrow: 0,
+    width: '100%',
+    maxWidth: FORM_MAX,
+    justifyContent: 'flex-start',
+    alignItems: 'stretch',
+    gap: 28,
   },
   center: {
     alignItems: 'center',
     paddingTop: 24,
+    width: '100%',
   },
   emoji: {
     fontSize: 44,
@@ -175,7 +201,7 @@ const styles = StyleSheet.create({
   },
   input: {
     width: '100%',
-    maxWidth: 420,
+    maxWidth: FORM_MAX,
     borderWidth: 1,
     borderColor: authTheme.colors.border,
     borderRadius: 10,
@@ -186,9 +212,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   counter: {
-    alignSelf: 'flex-end',
+    alignSelf: 'center',
     width: '100%',
-    maxWidth: 420,
+    maxWidth: FORM_MAX,
     textAlign: 'right',
     color: '#A3A3A3',
     fontSize: 12,
@@ -204,6 +230,9 @@ const styles = StyleSheet.create({
     backgroundColor: authTheme.colors.primary,
     borderRadius: 12,
     minHeight: 52,
+    width: '100%',
+    maxWidth: FORM_MAX,
+    alignSelf: 'center',
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 24,

@@ -24,17 +24,23 @@ export default function DiscoverScreen() {
 
   useEffect(() => { marketPref.get().then(setMarket); }, []);
 
-  const load = useCallback(async (m: Market) => {
+  const load = useCallback(async (m: Market, force = false) => {
     try {
       setError(null);
-      const res = await api.discoverFeed(m);
+      if (!force) {
+        const cached = await api.peek<any>(`/discover/feed?market=${m}`, true);
+        if (cached?.widgets) {
+          setData(cached);
+          setLoading(false);
+        }
+      }
+      const res = await api.discoverFeed(m, force);
       setData(res);
-      // Parallel-fetch the rich widgets (non-blocking for main feed)
       Promise.all([
-        api.discoverForecast(m).catch(() => null),
-        api.discoverEarningsCalendar(m).catch(() => null),
-        api.discoverDividendCalendar(m).catch(() => null),
-        api.discoverSectorRotation(m).catch(() => null),
+        api.discoverForecast(m, force).catch(() => null),
+        api.discoverEarningsCalendar(m, force).catch(() => null),
+        api.discoverDividendCalendar(m, force).catch(() => null),
+        api.discoverSectorRotation(m, force).catch(() => null),
       ]).then(([forecast, earnings, dividend, sector]) => {
         setExtra({ forecast, earnings, dividend, sector });
       });
@@ -46,9 +52,14 @@ export default function DiscoverScreen() {
     }
   }, []);
 
-  useEffect(() => { setLoading(true); setExtra({}); load(market); marketPref.set(market); }, [market, load]);
+  useEffect(() => {
+    setExtra({});
+    setLoading(true);
+    load(market);
+    marketPref.set(market);
+  }, [market, load]);
 
-  const onRefresh = useCallback(() => { setRefreshing(true); setExtra({}); load(market); }, [market, load]);
+  const onRefresh = useCallback(() => { setRefreshing(true); setExtra({}); load(market, true); }, [market, load]);
 
   const w = data?.widgets || {};
 

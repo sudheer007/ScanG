@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, NativeSyntheticEvent, NativeScrollEvent } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, NativeSyntheticEvent, NativeScrollEvent, LayoutChangeEvent } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { theme } from '@/src/theme';
@@ -31,11 +31,13 @@ interface Props {
 
 const ROW_HEIGHT = 56; // single source of truth — both sticky & data cells use this
 
+type ColW = SortableColumn & { width: number };
+
 /**
- * SortableDataTable v2 — fixes:
- *  - Sticky column row heights now exactly match scrolling-region row heights (ROW_HEIGHT).
- *  - Header horizontally scrolls in sync with the body.
- *  - Single outer vertical ScrollView keeps both columns aligned during vertical scroll.
+ * SortableDataTable v2:
+ *  - Mobile / narrow: fixed column widths + horizontal scroll (unchanged).
+ *  - Laptop / wide: flex columns fill available width (no clipping, no blank right gap).
+ *  - Vertical scroll is owned by the parent screen (avoids double scrollbars).
  */
 export default function SortableDataTable({
   columns,
@@ -52,6 +54,7 @@ export default function SortableDataTable({
   const router = useRouter();
   const [sortKey, setSortKey] = useState<string | null>(defaultSort?.key || null);
   const [sortDesc, setSortDesc] = useState<boolean>(defaultSort?.desc ?? true);
+  const [tableWidth, setTableWidth] = useState(0);
 
   const sortedRows = useMemo(() => {
     if (!sortKey) return rows;
@@ -69,16 +72,29 @@ export default function SortableDataTable({
     return sorted;
   }, [rows, sortKey, sortDesc, columns]);
 
-  const totalScrollW = columns.reduce((acc, c) => acc + (c.width || 100), 0);
+  const displayCols: ColW[] = useMemo(
+    () => columns.map((c) => ({ ...c, width: c.width || 100 })),
+    [columns],
+  );
+  const baseTotal = useMemo(
+    () => displayCols.reduce((acc, c) => acc + c.width, 0),
+    [displayCols],
+  );
+
+  // Wide only when measured width clearly exceeds natural table size.
+  const fillWide = tableWidth > 0 && tableWidth >= stickyWidth + baseTotal + 8;
+
   const headerScrollRef = useRef<ScrollView>(null);
   const bodyScrollRef = useRef<ScrollView>(null);
 
-  // One-directional sync: body drives header. Header is NOT user-draggable
-  // to avoid a programmatic-scroll feedback loop that caused stutter/vibration
-  // (especially when scrolling left against momentum).
   const onBodyHorizScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const x = e.nativeEvent.contentOffset.x;
     headerScrollRef.current?.scrollTo({ x, animated: false });
+  };
+
+  const onTableLayout = (e: LayoutChangeEvent) => {
+    const w = Math.floor(e.nativeEvent.layout.width);
+    if (w > 0 && Math.abs(w - tableWidth) > 1) setTableWidth(w);
   };
 
   const handleSort = (key: string) => {
@@ -94,6 +110,9 @@ export default function SortableDataTable({
     }
   };
 
+  const alignItemsFor = (align?: 'left' | 'right' | 'center') =>
+    align === 'right' ? 'flex-end' as const : align === 'center' ? 'center' as const : 'flex-start' as const;
+
   const defaultStickyRender = (r: any) => (
     <View style={styles.stickyContent}>
       <Text style={styles.stickySym} numberOfLines={1}>{String(r[stickyField] || '').replace('.NS', '')}</Text>
@@ -101,9 +120,61 @@ export default function SortableDataTable({
     </View>
   );
 
+  const renderHeaderCells = (wide: boolean) =>
+    displayCols.map((c) => (
+      <TouchableOpacity
+        key={c.key}
+        onPress={() => handleSort(c.key)}
+        style={[
+          styles.headerCellTouch,
+          wide
+            ? { flex: c.width, minWidth: 0, justifyContent: c.align === 'right' ? 'flex-end' : c.align === 'center' ? 'center' : 'flex-start' }
+            : { width: c.width, justifyContent: c.align === 'right' ? 'flex-end' : c.align === 'center' ? 'center' : 'flex-start' },
+        ]}
+      >
+        <Text style={styles.headerCellText} numberOfLines={1}>{c.label}</Text>
+        {sortKey === c.key ? <Ionicons name={sortDesc ? 'caret-down' : 'caret-up'} size={9} color={theme.colors.text} /> : null}
+      </TouchableOpacity>
+    ));
+
+  const renderBodyCells = (r: any, wide: boolean) =>
+    displayCols.map((c) => {
+      const tone = c.tone ? c.tone(r) : undefined;
+      const color =
+        tone === 'pos' ? theme.colors.success :
+        tone === 'neg' ? theme.colors.error :
+        theme.colors.text;
+      const rendered = c.render ? c.render(r) : (r[c.key] ?? '—');
+      const isPrimitive = typeof rendered === 'string' || typeof rendered === 'number';
+      return (
+        <View
+          key={c.key}
+          style={[
+            styles.bodyCell,
+            wide
+              ? { flex: c.width, minWidth: 0, alignItems: alignItemsFor(c.align) }
+              : { width: c.width, alignItems: alignItemsFor(c.align) },
+          ]}
+        >
+          {isPrimitive ? (
+            <Text
+              numberOfLines={1}
+              style={[
+                styles.cell,
+                { textAlign: c.align || 'left', color, width: '100%' },
+                c.mono && { fontVariant: ['tabular-nums'] },
+              ]}
+            >
+              {rendered}
+            </Text>
+          ) : rendered}
+        </View>
+      );
+    });
+
   return (
-    <View style={styles.wrap} testID={testID}>
-      {/* ===== Header row (sticky col + horizontally scrollable header) ===== */}
+    <View style={styles.wrap} testID={testID} onLayout={onTableLayout}>
+      {/* ===== Header ===== */}
       <View style={styles.headerRow}>
         <View style={[styles.stickyHeaderCell, { width: stickyWidth }]}>
           <TouchableOpacity onPress={() => handleSort(stickyField)} style={styles.headerCellTouch}>
@@ -111,36 +182,53 @@ export default function SortableDataTable({
             {sortKey === stickyField ? <Ionicons name={sortDesc ? 'caret-down' : 'caret-up'} size={9} color={theme.colors.text} /> : null}
           </TouchableOpacity>
         </View>
-        <ScrollView
-          ref={headerScrollRef}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          scrollEnabled={false}
-          style={{ flex: 1, pointerEvents: 'box-none' }}
-          contentContainerStyle={{ width: Math.max(totalScrollW, 320) }}
-        >
-          <View style={{ flexDirection: 'row' }}>
-            {columns.map((c) => (
-              <TouchableOpacity
-                key={c.key}
-                onPress={() => handleSort(c.key)}
-                style={[styles.headerCellTouch, {
-                  width: c.width || 100,
-                  justifyContent: c.align === 'right' ? 'flex-end' : c.align === 'center' ? 'center' : 'flex-start',
-                }]}
-              >
-                <Text style={styles.headerCellText} numberOfLines={1}>{c.label}</Text>
-                {sortKey === c.key ? <Ionicons name={sortDesc ? 'caret-down' : 'caret-up'} size={9} color={theme.colors.text} /> : null}
-              </TouchableOpacity>
-            ))}
+        {fillWide ? (
+          <View style={styles.flexHeaderTrack}>
+            {renderHeaderCells(true)}
           </View>
-        </ScrollView>
+        ) : (
+          <ScrollView
+            ref={headerScrollRef}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            scrollEnabled={false}
+            style={{ flex: 1, pointerEvents: 'box-none' }}
+            contentContainerStyle={{ width: Math.max(baseTotal, 320) }}
+          >
+            <View style={{ flexDirection: 'row' }}>
+              {renderHeaderCells(false)}
+            </View>
+          </ScrollView>
+        )}
       </View>
 
-      {/* ===== Body: vertical scroll wraps both sticky col + horizontal-scroll data ===== */}
-      <ScrollView style={{ maxHeight: 800 }} nestedScrollEnabled>
+      {/* ===== Body (no nested vertical scroll — parent page scrolls) ===== */}
+      {fillWide ? (
+        <View>
+          {sortedRows.map((r, idx) => (
+            <TouchableOpacity
+              key={rowKey ? rowKey(r) : idx.toString()}
+              testID={`row-${r[stickyField]}`}
+              activeOpacity={0.7}
+              onPress={() => handlePressRow(r)}
+              style={[styles.bodyRow, styles.wideRow, idx % 2 === 1 && { backgroundColor: theme.colors.bg2 }]}
+            >
+              <View style={[
+                styles.stickyCell,
+                styles.stickyCellWide,
+                { width: stickyWidth },
+                idx % 2 === 1 && { backgroundColor: theme.colors.bg2 },
+              ]}>
+                {(renderSticky || defaultStickyRender)(r)}
+              </View>
+              <View style={styles.flexBodyTrack}>
+                {renderBodyCells(r, true)}
+              </View>
+            </TouchableOpacity>
+          ))}
+        </View>
+      ) : (
         <View style={{ flexDirection: 'row' }}>
-          {/* Sticky column body */}
           <View style={[styles.stickyBodyCol, { width: stickyWidth }]}>
             {sortedRows.map((r, idx) => (
               <TouchableOpacity
@@ -153,7 +241,6 @@ export default function SortableDataTable({
               </TouchableOpacity>
             ))}
           </View>
-          {/* Horizontally scrollable body — synced with header */}
           <ScrollView
             ref={bodyScrollRef}
             horizontal
@@ -162,7 +249,7 @@ export default function SortableDataTable({
             onScroll={onBodyHorizScroll}
             style={{ flex: 1 }}
           >
-            <View style={{ width: Math.max(totalScrollW, 320) }}>
+            <View style={{ width: Math.max(baseTotal, 320) }}>
               {sortedRows.map((r, idx) => (
                 <TouchableOpacity
                   key={rowKey ? rowKey(r) : idx.toString()}
@@ -171,49 +258,44 @@ export default function SortableDataTable({
                   onPress={() => handlePressRow(r)}
                   style={[styles.bodyRow, idx % 2 === 1 && { backgroundColor: theme.colors.bg2 }]}
                 >
-                  {columns.map((c) => {
-                    const tone = c.tone ? c.tone(r) : undefined;
-                    const color =
-                      tone === 'pos' ? theme.colors.success :
-                      tone === 'neg' ? theme.colors.error :
-                      theme.colors.text;
-                    const rendered = c.render ? c.render(r) : (r[c.key] ?? '—');
-                    const isPrimitive = typeof rendered === 'string' || typeof rendered === 'number';
-                    return (
-                      <View key={c.key} style={[styles.bodyCell, { width: c.width || 100 }]}>
-                        {isPrimitive ? (
-                          <Text
-                            numberOfLines={1}
-                            style={[
-                              styles.cell,
-                              { textAlign: c.align || 'left', color },
-                              c.mono && { fontVariant: ['tabular-nums'] },
-                            ]}
-                          >
-                            {rendered}
-                          </Text>
-                        ) : rendered}
-                      </View>
-                    );
-                  })}
+                  {renderBodyCells(r, false)}
                 </TouchableOpacity>
               ))}
             </View>
           </ScrollView>
         </View>
-      </ScrollView>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  wrap: { backgroundColor: theme.colors.bg },
+  wrap: {
+    backgroundColor: theme.colors.bg,
+    width: '100%',
+    alignSelf: 'stretch',
+    overflow: 'hidden',
+  },
   headerRow: {
     flexDirection: 'row',
     backgroundColor: theme.colors.bg2,
     borderBottomWidth: 1,
     borderBottomColor: theme.colors.border,
     height: 32,
+    width: '100%',
+  },
+  flexHeaderTrack: {
+    flex: 1,
+    flexDirection: 'row',
+    minWidth: 0,
+  },
+  flexBodyTrack: {
+    flex: 1,
+    flexDirection: 'row',
+    minWidth: 0,
+  },
+  wideRow: {
+    width: '100%',
   },
   stickyHeaderCell: {
     height: 32,
@@ -248,6 +330,11 @@ const styles = StyleSheet.create({
     borderBottomColor: theme.colors.divider,
     justifyContent: 'center',
   },
+  stickyCellWide: {
+    borderRightWidth: 1,
+    borderRightColor: theme.colors.border,
+    backgroundColor: theme.colors.bg,
+  },
   stickyContent: { justifyContent: 'center' },
   stickySym: { color: theme.colors.text, fontSize: 13, fontWeight: '800' },
   stickyName: { color: theme.colors.textMuted, fontSize: 9, marginTop: 2 },
@@ -261,6 +348,7 @@ const styles = StyleSheet.create({
     height: ROW_HEIGHT,
     paddingHorizontal: 6,
     justifyContent: 'center',
+    overflow: 'hidden',
   },
   cell: { color: theme.colors.text, fontSize: 12, fontWeight: '500' },
 });

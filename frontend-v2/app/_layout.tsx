@@ -7,6 +7,7 @@ import { StatusBar } from "expo-status-bar";
 
 import { AuthProvider } from "@/src/auth/AuthContext";
 import { useIconFonts } from "@/src/hooks/use-icon-fonts";
+import { api } from "@/src/api";
 
 LogBox.ignoreAllLogs(true);
 
@@ -14,6 +15,11 @@ SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const [loaded, error] = useIconFonts();
+
+  useEffect(() => {
+    // Wake Render free-tier API as early as possible (before tab data fetches).
+    api.wakeBackend();
+  }, []);
 
   useEffect(() => {
     if (loaded || error) {
