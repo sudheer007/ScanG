@@ -1,13 +1,15 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 
 import { api, IndexQuote, Market, Stock, NewsItem, SectorRow } from '@/src/api';
 import { theme, fmtPrice, fmtPct, fmtMarketCap, changeColor } from '@/src/theme';
 import { fmtDayShort, daysUntilLabel } from '@/src/utils/date';
+import { mergeLiveQuotes } from '@/src/utils/mergeLiveQuotes';
 import { marketPref } from '@/src/storage-keys';
+import AppRefreshControl from '@/src/components/AppRefreshControl';
 import ChipRow from '@/src/components/ChipRow';
 import SegmentedTabs from '@/src/components/widgets/SegmentedTabs';
 import StockRow from '@/src/components/StockRow';
@@ -19,9 +21,14 @@ import { EmptyState, ErrorState, LoadingState } from '@/src/components/States';
 
 type Tab = 'overview' | 'movers' | 'sectors' | 'news' | 'calendar';
 
+/** Same cadence as stock detail live quote polling. */
+const LIVE_QUOTE_MS = 15_000;
+/** Occasional full refresh to reshuffle movers ranks and keep sector aggregates live. */
+const OVERVIEW_REORDER_MS = 60_000;
+
 export default function MarketsScreen() {
   const router = useRouter();
-  const [market, setMarket] = useState<Market>('US');
+  const [market, setMarket] = useState<Market | null>(() => marketPref.peek());
   const [tab, setTab] = useState<Tab>('overview');
 
   // data
@@ -46,8 +53,42 @@ export default function MarketsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const loadedRef = useRef<Set<string>>(new Set());
+  const listsRef = useRef({ tab, indices, gainers, losers, mostActive });
+  listsRef.current = { tab, indices, gainers, losers, mostActive };
 
-  useEffect(() => { marketPref.get().then(setMarket); }, []);
+  // Resolve saved market before any fetch — prevents US flash when preference is IN.
+  useEffect(() => {
+    let cancelled = false;
+    marketPref.get().then((m) => {
+      if (!cancelled) setMarket(m);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  const refreshVisibleQuotes = useCallback(async () => {
+    const { tab: t, indices: idx, gainers: g, losers: l, mostActive: a } = listsRef.current;
+    if (t !== 'overview' && t !== 'movers') return;
+    const syms = Array.from(
+      new Set([
+        ...idx.map((x) => x.symbol),
+        ...g.map((x) => x.symbol),
+        ...l.map((x) => x.symbol),
+        ...a.map((x) => x.symbol),
+      ].filter(Boolean)),
+    ).slice(0, 49);
+    if (!syms.length) return;
+    try {
+      const r = await api.batchLiveQuotes(syms);
+      const quotes = r.quotes || [];
+      if (!quotes.length) return;
+      setIndices((prev) => mergeLiveQuotes(prev, quotes));
+      setGainers((prev) => mergeLiveQuotes(prev, quotes));
+      setLosers((prev) => mergeLiveQuotes(prev, quotes));
+      setMostActive((prev) => mergeLiveQuotes(prev, quotes));
+    } catch {
+      /* keep last prices on background poll failure */
+    }
+  }, []);
 
   const loadTab = useCallback(async (t: Tab, m: Market, force = false) => {
     try {
@@ -100,6 +141,7 @@ export default function MarketsScreen() {
 
   // Instant paint from disk/memory cache, then refresh in background.
   useEffect(() => {
+    if (!market) return;
     let cancelled = false;
     (async () => {
       const cached = await api.peek<{ indices?: IndexQuote[]; gainers?: Stock[]; losers?: Stock[] }>(
@@ -117,15 +159,31 @@ export default function MarketsScreen() {
     return () => { cancelled = true; };
   }, [market]);
 
-  // load on market/tab change
-  useEffect(() => {
-    const key = `${market}:${tab}`;
-    if (!loadedRef.current.has(key)) setLoading(true);
-    loadTab(tab, market);
-    marketPref.set(market);
-  }, [market, tab, loadTab]);
+  // Load on market/tab change + live price patch while Markets tab is focused.
+  useFocusEffect(
+    useCallback(() => {
+      if (!market) return;
+      const key = `${market}:${tab}`;
+      if (!loadedRef.current.has(key)) setLoading(true);
+      void loadTab(tab, market);
+      // Wait for list state to commit, then patch with fresh Yahoo quotes.
+      const firstLive = setTimeout(() => void refreshVisibleQuotes(), 750);
+      const liveId = setInterval(() => void refreshVisibleQuotes(), LIVE_QUOTE_MS);
+      const reorderId = setInterval(() => {
+        if (tab === 'overview' || tab === 'movers' || tab === 'sectors') {
+          void loadTab(tab, market, true);
+        }
+      }, OVERVIEW_REORDER_MS);
+      return () => {
+        clearTimeout(firstLive);
+        clearInterval(liveId);
+        clearInterval(reorderId);
+      };
+    }, [market, tab, loadTab, refreshVisibleQuotes]),
+  );
 
   const onRefresh = useCallback(() => {
+    if (!market) return;
     setRefreshing(true);
     loadTab(tab, market, true);
   }, [tab, market, loadTab]);
@@ -140,6 +198,13 @@ export default function MarketsScreen() {
     }
   }, [sectors]);
 
+  // Keep sector detail sheet in sync when aggregates auto-refresh.
+  useEffect(() => {
+    if (!selectedSector) return;
+    const next = sectors.find((s) => s.sector === selectedSector.sector);
+    if (next && next !== selectedSector) setSelectedSector(next);
+  }, [sectors, selectedSector]);
+
   const hasData = (() => {
     switch (tab) {
       case 'overview': return indices.length > 0 || gainers.length > 0;
@@ -152,6 +217,30 @@ export default function MarketsScreen() {
 
   const breadth = sectors.reduce((acc, s) => { acc.w += s.winners; acc.l += s.losers; return acc; }, { w: 0, l: 0 });
   const breadthPct = breadth.w + breadth.l > 0 ? Math.round((breadth.w * 100) / (breadth.w + breadth.l)) : 0;
+
+  const selectMarket = useCallback((v: Market) => {
+    setMarket(v);
+    void marketPref.set(v);
+    // Drop previous market's rows so we never flash US while IN loads (or vice versa).
+    setIndices([]);
+    setGainers([]);
+    setLosers([]);
+    setMostActive([]);
+    setSectors([]);
+    setNews([]);
+    setEarnings([]);
+    setDividends([]);
+    loadedRef.current.clear();
+    setLoading(true);
+  }, []);
+
+  if (!market) {
+    return (
+      <SafeAreaView style={styles.safe} edges={['top']} testID="markets-screen">
+        <LoadingState label="Loading market…" />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']} testID="markets-screen">
@@ -172,7 +261,7 @@ export default function MarketsScreen() {
           { value: 'IN', label: '🇮🇳 India', testID: 'market-IN' },
         ]}
         value={market}
-        onChange={(v) => setMarket(v as Market)}
+        onChange={(v) => selectMarket(v as Market)}
       />
 
       <SegmentedTabs
@@ -191,7 +280,7 @@ export default function MarketsScreen() {
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={{ paddingBottom: 130, paddingTop: 4 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.text} />}
+        refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         {loading && !hasData ? (
           <LoadingState label="Fetching live market data…" />
@@ -254,14 +343,20 @@ function OverviewTab({ indices, gainers, losers, sectors, breadthPct, onStock, o
     <>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.indicesRow} style={styles.indicesScroll} testID="indices-row">
         {indices.map((idx) => (
-          <View key={idx.symbol} style={styles.indexCard} testID={`index-card-${idx.symbol}`}>
+          <TouchableOpacity
+            key={idx.symbol}
+            activeOpacity={0.8}
+            onPress={() => onStock(idx.symbol)}
+            style={styles.indexCard}
+            testID={`index-card-${idx.symbol}`}
+          >
             <Text style={styles.indexName} numberOfLines={1}>{idx.name}</Text>
             <Text style={styles.indexValue}>{fmtPrice(idx.price, idx.currency).replace('$', '').replace('₹', '')}</Text>
             <View style={styles.indexChangeRow}>
               <Text style={[styles.indexChange, { color: changeColor(idx.change_pct) }]}>{fmtPct(idx.change_pct)}</Text>
               <Sparkline data={idx.sparkline || []} width={60} height={20} />
             </View>
-          </View>
+          </TouchableOpacity>
         ))}
       </ScrollView>
 

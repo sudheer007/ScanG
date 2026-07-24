@@ -1,11 +1,10 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   View,
   Text,
   ScrollView,
   StyleSheet,
   TouchableOpacity,
-  RefreshControl,
   ActivityIndicator,
   Modal,
 } from 'react-native';
@@ -19,6 +18,7 @@ import { theme } from '@/src/theme';
 import { WatchItem } from '@/src/storage-keys';
 import { listWatchlist, removeWatchlistItem } from '@/src/services/watchlistService';
 import { useAuth } from '@/src/hooks/useAuth';
+import AppRefreshControl from '@/src/components/AppRefreshControl';
 import StockRow from '@/src/components/StockRow';
 import { LoadingState } from '@/src/components/States';
 
@@ -41,6 +41,9 @@ const ALLOWED_PORTFOLIO_EXTENSIONS = [
   '.webp',
 ];
 
+/** Auto-refresh quotes while watchlist is focused (same as stock detail). */
+const QUOTE_POLL_MS = 15_000;
+
 function isAllowedPortfolioFile(name: string): boolean {
   const lower = name.toLowerCase();
   return ALLOWED_PORTFOLIO_EXTENSIONS.some((ext) => lower.endsWith(ext));
@@ -60,6 +63,44 @@ export default function WatchlistScreen() {
   const [importError, setImportError] = useState<string | null>(null);
   const [invalidRows, setInvalidRows] = useState<InvalidRow[]>([]);
   const [showInvalid, setShowInvalid] = useState(false);
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+
+  const applyQuotes = useCallback((list: WatchItem[], fetched: Stock[]) => {
+    const ordered: Stock[] = [];
+    list.forEach((wi) => {
+      const q = fetched.find((x) => x.symbol === wi.symbol);
+      if (q) ordered.push(q as Stock);
+    });
+    setQuotes(ordered);
+  }, []);
+
+  const refreshQuotes = useCallback(async () => {
+    const list = itemsRef.current;
+    if (list.length === 0) return;
+    try {
+      const r = await api.batchLiveQuotes(list.map((x) => x.symbol));
+      const quotes = r.quotes || [];
+      if (!quotes.length) return;
+      setQuotes((prev) => {
+        const bySym = new Map(quotes.map((q) => [q.symbol, q]));
+        return prev.map((row) => {
+          const q = bySym.get(row.symbol);
+          if (!q) return row;
+          return {
+            ...row,
+            price: q.price,
+            change: q.change,
+            change_pct: q.change_pct,
+            volume: q.volume ?? row.volume,
+            currency: q.currency || row.currency,
+          };
+        });
+      });
+    } catch {
+      /* keep last quotes on background poll failure */
+    }
+  }, []);
 
   const load = useCallback(async () => {
     const list = await listWatchlist(user?.uid);
@@ -72,19 +113,21 @@ export default function WatchlistScreen() {
     }
     try {
       const r = await api.batchQuotes(list.map((x) => x.symbol));
-      const ordered: Stock[] = [];
-      list.forEach((wi) => {
-        const q = r.quotes.find((x) => x.symbol === wi.symbol);
-        if (q) ordered.push(q as Stock);
-      });
-      setQuotes(ordered);
+      applyQuotes(list, (r.quotes || []) as Stock[]);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [user?.uid]);
+  }, [user?.uid, applyQuotes]);
 
-  useFocusEffect(useCallback(() => { setLoading(true); load(); }, [load]));
+  useFocusEffect(
+    useCallback(() => {
+      setLoading(true);
+      void load();
+      const id = setInterval(() => void refreshQuotes(), QUOTE_POLL_MS);
+      return () => clearInterval(id);
+    }, [load, refreshQuotes]),
+  );
 
   const remove = async (symbol: string) => {
     await removeWatchlistItem(symbol, user?.uid);
@@ -215,14 +258,13 @@ export default function WatchlistScreen() {
       <ScrollView
         contentContainerStyle={{ paddingBottom: 40 }}
         refreshControl={
-          <RefreshControl
+          <AppRefreshControl
             refreshing={refreshing}
             onRefresh={() => {
               if (importing) return;
               setRefreshing(true);
               load();
             }}
-            tintColor={theme.colors.text}
           />
         }
       >

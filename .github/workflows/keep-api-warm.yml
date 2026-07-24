@@ -24,6 +24,15 @@ jobs:
             echo "SCANG_API_HEALTH_URL secret is not set — skip ping."
             exit 0
           fi
-          curl --fail --max-time 90 -sS "$HEALTH_URL"
-          echo
-          echo "Pinged at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          # Free-tier cold starts can exceed 90s; retry with a longer per-attempt budget.
+          for i in 1 2 3; do
+            if curl --fail --max-time 180 -sS "$HEALTH_URL"; then
+              echo
+              echo "Pinged at $(date -u +%Y-%m-%dT%H:%M:%SZ) (attempt $i)"
+              exit 0
+            fi
+            echo "Attempt $i failed; retrying in 15s..."
+            sleep 15
+          done
+          echo "All ping attempts failed."
+          exit 1

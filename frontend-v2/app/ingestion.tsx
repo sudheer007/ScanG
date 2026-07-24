@@ -5,7 +5,6 @@ import {
   ScrollView,
   StyleSheet,
   TouchableOpacity,
-  RefreshControl,
   TextInput,
   ActivityIndicator,
 } from 'react-native';
@@ -15,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { api, Market } from '@/src/api';
 import { theme } from '@/src/theme';
+import AppRefreshControl from '@/src/components/AppRefreshControl';
 import ScreenHeader from '@/src/components/ScreenHeader';
 import { ErrorState, LoadingState } from '@/src/components/States';
 import type { IngestionRun, IngestionStatus } from '@/src/types/ingestion';
@@ -101,7 +101,7 @@ export default function IngestionScreen() {
 
       <ScrollView
         contentContainerStyle={styles.content}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(true); }} tintColor={theme.colors.textMuted} />}
+        refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(true); }} tintColor={theme.colors.textMuted} />}
       >
         <Text style={styles.section}>Partitions</Text>
         {(status?.partitions || []).map((p) => (

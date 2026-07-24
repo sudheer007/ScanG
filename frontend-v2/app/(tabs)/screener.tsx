@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, RefreshControl } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
@@ -7,6 +7,9 @@ import { useFocusEffect } from 'expo-router';
 import { api, Market, Stock } from '@/src/api';
 import { theme } from '@/src/theme';
 import { marketPref, screenerSectorPref } from '@/src/storage-keys';
+import { useFocusInterval } from '@/src/hooks/useFocusInterval';
+import { mergeLiveQuotes } from '@/src/utils/mergeLiveQuotes';
+import AppRefreshControl from '@/src/components/AppRefreshControl';
 import ChipRow from '@/src/components/ChipRow';
 import { EmptyState, ErrorState, LoadingState } from '@/src/components/States';
 import FilterSheet from '@/src/components/FilterSheet';
@@ -18,9 +21,13 @@ import { PRESETS, Preset } from '@/src/screener/presets';
 
 type Mode = 'quick' | 'custom';
 const BASE_COLS = ['price', 'change_pct', 'market_cap', 'pe', 'roe'];
+/** Live price patch for visible screener rows (same as stock detail). */
+const LIVE_QUOTE_MS = 15_000;
+/** Soft-reload universe for RSI / ROE / filters without pull-to-refresh. */
+const FUNDAMENTALS_REFRESH_MS = 5 * 60_000;
 
 export default function ScreenerScreen() {
-  const [market, setMarket] = useState<Market>('US');
+  const [market, setMarket] = useState<Market | null>(() => marketPref.peek());
   const [mode, setMode] = useState<Mode>('quick');
   const [filters, setFilters] = useState<ActiveFilters>({});
   const [activePreset, setActivePreset] = useState<string | null>(null);
@@ -30,8 +37,15 @@ export default function ScreenerScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const resultsRef = useRef<Stock[]>([]);
 
-  useEffect(() => { marketPref.get().then(setMarket); }, []);
+  useEffect(() => {
+    let cancelled = false;
+    marketPref.get().then((m) => {
+      if (!cancelled) setMarket(m);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -39,7 +53,7 @@ export default function ScreenerScreen() {
       screenerSectorPref.get().then((nav) => {
         if (cancelled || !nav?.sector) return;
         setMarket(nav.market);
-        marketPref.set(nav.market);
+        void marketPref.set(nav.market);
         setFilters({ sector: nav.sector });
         setMode('custom');
         setActivePreset(null);
@@ -49,10 +63,11 @@ export default function ScreenerScreen() {
     }, []),
   );
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
+    if (!market) return;
     setError(null);
     try {
-      const r = await api.screenerUniverse(market);
+      const r = await api.screenerUniverse(market, force);
       setUniverse(r.stocks);
       setCurrency(r.currency);
     } catch (e: any) {
@@ -63,9 +78,12 @@ export default function ScreenerScreen() {
     }
   }, [market]);
 
-  useEffect(() => { setLoading(true); load(); }, [market, load]);
-
-  const onRefresh = () => { setRefreshing(true); load(); };
+  useEffect(() => {
+    if (!market) return;
+    setUniverse([]);
+    setLoading(true);
+    load();
+  }, [market, load]);
 
   const results = useMemo(() => {
     const filtered = applyFilters(universe, filters);
@@ -73,6 +91,71 @@ export default function ScreenerScreen() {
     const sortKey = keys[0] || 'market_cap';
     return sortStocks(filtered, sortKey, true);
   }, [universe, filters]);
+  resultsRef.current = results;
+
+  const refreshVisibleQuotes = useCallback(async () => {
+    const visible = resultsRef.current.slice(0, 49);
+    if (!visible.length) return;
+    try {
+      const r = await api.batchLiveQuotes(visible.map((s) => s.symbol));
+      const quotes = r.quotes || [];
+      if (!quotes.length) return;
+      setUniverse((prev) => mergeLiveQuotes(prev, quotes));
+    } catch {
+      /* keep last prices */
+    }
+  }, []);
+
+  const refreshFundamentals = useCallback(async () => {
+    if (!market) return;
+    try {
+      const r = await api.screenerUniverse(market, true);
+      setUniverse((prev) => {
+        // Re-apply live prices onto the fresh fundamentals snapshot.
+        const bySym = new Map(prev.map((s) => [s.symbol, s]));
+        return r.stocks.map((s) => {
+          const live = bySym.get(s.symbol);
+          if (!live) return s;
+          return {
+            ...s,
+            price: live.price ?? s.price,
+            change: live.change ?? s.change,
+            change_pct: live.change_pct ?? s.change_pct,
+            volume: live.volume ?? s.volume,
+          };
+        });
+      });
+      setCurrency(r.currency);
+    } catch {
+      /* keep last fundamentals */
+    }
+  }, [market]);
+
+  useFocusInterval(refreshVisibleQuotes, LIVE_QUOTE_MS, { immediate: true });
+  useFocusInterval(refreshFundamentals, FUNDAMENTALS_REFRESH_MS, { immediate: false });
+
+  const columns = useMemo<SortableColumn[]>(() => {
+    const keys = [...BASE_COLS, ...activeMetricKeys(filters).filter((k) => !BASE_COLS.includes(k) && METRIC_BY_KEY[k]?.available)];
+    return keys.map((key) => {
+      const m = METRIC_BY_KEY[key];
+      const label = (m?.label || key).replace(' (TTM)', '').replace(' Ratio', '').replace(' Capitalization', ' Cap');
+      const fmt = m?.fmt || 'num';
+      const width = fmt === 'big' ? 88 : fmt === 'pct' ? 78 : fmt === 'money' ? 76 : 66;
+      const isPct = fmt === 'pct';
+      return {
+        key,
+        label,
+        width,
+        align: 'right',
+        mono: true,
+        sortValue: (r: any) => (r[key] ?? null),
+        tone: isPct ? (r: any) => { const v = r[key]; return v == null ? undefined : v >= 0 ? 'pos' : 'neg'; } : undefined,
+        render: (r: any) => fmtMetric(key, r[key], currency),
+      } as SortableColumn;
+    });
+  }, [filters, currency]);
+
+  const onRefresh = () => { setRefreshing(true); load(true); };
 
   const hasFilters = Object.keys(filters).length > 0;
 
@@ -96,31 +179,18 @@ export default function ScreenerScreen() {
     setFilters(next); setActivePreset(null);
   };
 
-  const columns = useMemo<SortableColumn[]>(() => {
-    const keys = [...BASE_COLS, ...activeMetricKeys(filters).filter((k) => !BASE_COLS.includes(k) && METRIC_BY_KEY[k]?.available)];
-    return keys.map((key) => {
-      const m = METRIC_BY_KEY[key];
-      const label = (m?.label || key).replace(' (TTM)', '').replace(' Ratio', '').replace(' Capitalization', ' Cap');
-      const fmt = m?.fmt || 'num';
-      const width = fmt === 'big' ? 88 : fmt === 'pct' ? 78 : fmt === 'money' ? 76 : 66;
-      const isPct = fmt === 'pct';
-      return {
-        key,
-        label,
-        width,
-        align: 'right',
-        mono: true,
-        sortValue: (r: any) => (r[key] ?? null),
-        tone: isPct ? (r: any) => { const v = r[key]; return v == null ? undefined : v >= 0 ? 'pos' : 'neg'; } : undefined,
-        render: (r: any) => fmtMetric(key, r[key], currency),
-      } as SortableColumn;
-    });
-  }, [filters, currency]);
-
   const onModeChange = (m: Mode) => {
     setMode(m);
     if (m === 'custom' && !hasFilters) setTimeout(() => setSheetOpen(true), 150);
   };
+
+  if (!market) {
+    return (
+      <SafeAreaView style={styles.safe} edges={['top']} testID="screener-screen">
+        <LoadingState label="Loading market…" />
+      </SafeAreaView>
+    );
+  }
 
   const customTitle = activePreset
     ? PRESETS.find((p) => p.id === activePreset)?.name
@@ -177,7 +247,7 @@ export default function ScreenerScreen() {
       ) : mode === 'quick' ? (
         <ScrollView
           contentContainerStyle={styles.grid}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.text} />}
+          refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
           <Text style={styles.gridHint}>Tap a screen to instantly load expert filters — then tweak any value.</Text>
           {PRESETS.map((p) => (

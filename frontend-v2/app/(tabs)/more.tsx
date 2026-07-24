@@ -16,6 +16,7 @@ import { authTheme } from '@/src/auth/authTheme';
 import { useAuth } from '@/src/hooks/useAuth';
 import { listWatchlist } from '@/src/services/watchlistService';
 import { listPortfolio } from '@/src/services/portfolioService';
+import AppRefreshControl from '@/src/components/AppRefreshControl';
 
 const ACCENT = authTheme.colors.primary; // logo blue #1A82FF
 const ACCENT_DIM = 'rgba(26, 130, 255, 0.14)';
@@ -35,21 +36,34 @@ export default function MoreScreen() {
   const { user, profile } = useAuth();
   const [watchCount, setWatchCount] = useState(0);
   const [portfolioCount, setPortfolioCount] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const reloadCounts = useCallback(async () => {
+    const [watch, port] = await Promise.all([listWatchlist(user?.uid), listPortfolio(user?.uid)]);
+    setWatchCount(watch.length);
+    setPortfolioCount(port.length);
+  }, [user?.uid]);
 
   useFocusEffect(
     useCallback(() => {
       let active = true;
-      Promise.all([listWatchlist(user?.uid), listPortfolio(user?.uid)]).then(([watch, port]) => {
-        if (active) {
-          setWatchCount(watch.length);
-          setPortfolioCount(port.length);
-        }
+      void reloadCounts().then(() => {
+        if (!active) return;
       });
       return () => {
         active = false;
       };
-    }, [user?.uid]),
+    }, [reloadCounts]),
   );
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await reloadCounts();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [reloadCounts]);
 
   const displayName =
     profile?.display_name?.trim() ||
@@ -119,6 +133,7 @@ export default function MoreScreen() {
       <ScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
+        refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         <View style={styles.header}>
           <View style={{ flex: 1 }}>

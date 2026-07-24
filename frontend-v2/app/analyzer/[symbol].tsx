@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, RefreshControl, Linking } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Href, useLocalSearchParams, useRouter } from 'expo-router';
 
 import { api } from '@/src/api';
 import type { AnalyzerResult, AnalyzerPeer } from '@/src/types/analyzer';
 import { theme, fmtPrice, fmtPct, fmtMarketCap, changeColor, fmtNum } from '@/src/theme';
+import AppRefreshControl from '@/src/components/AppRefreshControl';
 import { LoadingState, ErrorState } from '@/src/components/States';
 import ScoreBar from '@/src/components/widgets/ScoreBar';
 import RatingBar from '@/src/components/widgets/RatingBar';
@@ -21,6 +22,18 @@ export default function AnalyzerScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const goBack = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+    if (sym) {
+      router.replace({ pathname: '/stock/[symbol]', params: { symbol: sym } });
+      return;
+    }
+    router.replace('/(tabs)' as Href);
+  }, [router, sym]);
+
   const load = useCallback(async (force = false) => {
     try {
       setError(null);
@@ -34,10 +47,10 @@ export default function AnalyzerScreen() {
   useEffect(() => { setLoading(true); load(); }, [load]);
 
   if (loading) return (
-    <SafeAreaView style={styles.safe} edges={['top']}><Header onBack={() => router.back()} title="AI Analyzer" subtitle={sym} /><LoadingState label="Running deep analysis…" /></SafeAreaView>
+    <SafeAreaView style={styles.safe} edges={['top']}><Header onBack={goBack} title="AI Analyzer" subtitle={sym} /><LoadingState label="Running deep analysis…" /></SafeAreaView>
   );
   if (error || !data) return (
-    <SafeAreaView style={styles.safe} edges={['top']}><Header onBack={() => router.back()} title="AI Analyzer" subtitle={sym} /><ErrorState message={error || 'No data'} onRetry={() => { setLoading(true); load(); }} /></SafeAreaView>
+    <SafeAreaView style={styles.safe} edges={['top']}><Header onBack={goBack} title="AI Analyzer" subtitle={sym} /><ErrorState message={error || 'No data'} onRetry={() => { setLoading(true); load(); }} /></SafeAreaView>
   );
 
   const v = data.verdict || {};
@@ -58,13 +71,13 @@ export default function AnalyzerScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['top']} testID={`analyzer-${sym}`}>
       <Header
-        onBack={() => router.back()}
+        onBack={goBack}
         title="AI Analyzer"
         subtitle={`${sym.replace('.NS', '')} · ${data.name || ''}`}
       />
       <ScrollView
         contentContainerStyle={{ paddingBottom: 120 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }} tintColor={theme.colors.text} />}
+        refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }} />}
       >
         {/* VERDICT HERO */}
         <View style={[styles.heroCard, verdictBorderColor(v.rating)]}>
@@ -501,7 +514,14 @@ function verdictBorderColor(r?: string) {
 function Header({ onBack, title, subtitle }: { onBack: () => void; title: string; subtitle: string }) {
   return (
     <View style={styles.header}>
-      <TouchableOpacity testID="back-btn" onPress={onBack} style={styles.iconBtn}>
+      <TouchableOpacity
+        testID="back-btn"
+        onPress={onBack}
+        style={styles.iconBtn}
+        hitSlop={12}
+        accessibilityRole="button"
+        accessibilityLabel="Go back"
+      >
         <Ionicons name="chevron-back" size={22} color={theme.colors.text} />
       </TouchableOpacity>
       <View style={{ flex: 1 }}>
@@ -639,7 +659,17 @@ function CatalystRow({ icon, label, value, tone }: { icon: any; label: string; v
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: theme.colors.bg },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: theme.spacing.lg, paddingTop: theme.spacing.sm, paddingBottom: theme.spacing.md, gap: 10 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing.lg,
+    paddingTop: theme.spacing.sm,
+    paddingBottom: theme.spacing.md,
+    gap: 10,
+    zIndex: 20,
+    elevation: 20,
+    backgroundColor: theme.colors.bg,
+  },
   iconBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: theme.colors.bg2, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: theme.colors.border },
   hTitle: { color: theme.colors.text, fontSize: 18, fontWeight: '800' },
   hSubtitle: { color: theme.colors.textMuted, fontSize: 12, marginTop: 2 },

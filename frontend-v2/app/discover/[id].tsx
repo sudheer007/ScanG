@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, RefreshControl } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -7,6 +7,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { api, Market } from '@/src/api';
 import { theme, fmtPct, fmtPrice, fmtMarketCap, changeColor } from '@/src/theme';
 import { marketPref } from '@/src/storage-keys';
+import AppRefreshControl from '@/src/components/AppRefreshControl';
 import { LoadingState, ErrorState, EmptyState } from '@/src/components/States';
 import SegmentedTabs from '@/src/components/widgets/SegmentedTabs';
 import DataTable, { Column } from '@/src/components/widgets/DataTable'; // eslint-disable-line @typescript-eslint/no-unused-vars
@@ -14,6 +15,18 @@ import SortableDataTable, { SortableColumn } from '@/src/components/widgets/Sort
 import RatingBar from '@/src/components/widgets/RatingBar';
 import ScoreBar from '@/src/components/widgets/ScoreBar';
 import ChipRow from '@/src/components/ChipRow';
+import { useFocusInterval } from '@/src/hooks/useFocusInterval';
+import {
+  collectDiscoverDetailSymbols,
+  patchDiscoverDetailQuotes,
+} from '@/src/utils/mergeLiveQuotes';
+
+/** Live LTP poll for Discover stock lists (same cadence as Markets / Screener). */
+const LIVE_QUOTE_MS = 15_000;
+/** Soft-reload detail widgets for RSI / ROE / scores without pull-to-refresh. */
+const FUNDAMENTALS_REFRESH_MS = 5 * 60_000;
+/** Sector aggregates need full-universe rebuild — match UNIVERSE_BUNDLE_CACHE. */
+const SECTOR_REFRESH_MS = 60_000;
 
 const TITLES: Record<string, { title: string; subtitle: string; icon: any; accent: string }> = {
   'ai-picks':         { title: 'AI Stock Recommendations', subtitle: 'Multi-factor scoring across momentum, value, quality, growth & technicals', icon: 'sparkles', accent: '#A78BFA' },
@@ -36,32 +49,40 @@ export default function DiscoverDetail() {
   const id = String(params.id || '');
   const meta = TITLES[id] || { title: 'Widget', subtitle: '', icon: 'sparkles', accent: theme.colors.text };
 
-  const [market, setMarket] = useState<Market>('US');
+  const [market, setMarket] = useState<Market | null>(() => marketPref.peek());
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<string>('');
+  const dataRef = useRef<any>(null);
+  dataRef.current = data;
 
-  useEffect(() => { marketPref.get().then(setMarket); }, []);
+  useEffect(() => {
+    let cancelled = false;
+    marketPref.get().then((m) => {
+      if (!cancelled) setMarket(m);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
-  const load = useCallback(async (m: Market) => {
+  const load = useCallback(async (m: Market, force = false) => {
     try {
       setError(null);
       let res: any;
       switch (id) {
-        case 'ai-picks':          res = await api.discoverAiPicks(m); setTab((t) => t || 'buy'); break;
-        case 'events':            res = await api.discoverEvents(m); setTab((t) => t || 'all'); break;
-        case 'analyst-ratings':   res = await api.discoverAnalystRatings(m); setTab((t) => t || 'upgrades'); break;
-        case 'popular-screeners': res = await api.discoverPopularScreeners(m); break;
-        case 'valuation':         res = await api.discoverValuation(m); setTab((t) => t || 'undervalued'); break;
-        case 'investor-picks':    res = await api.discoverInvestorPicks(m); setTab((t) => t || 'buffett'); break;
-        case 'most-active':       res = await api.discoverMostActive(m); break;
-        case 'winners-losers':    res = await api.discoverWinnersLosers(m); setTab((t) => t || 'gainers'); break;
-        case 'forecast':          res = await api.discoverForecast(m); setTab((t) => t || 'top'); break;
-        case 'earnings-calendar': res = await api.discoverEarningsCalendar(m); setTab((t) => t || 'all'); break;
-        case 'dividend-calendar': res = await api.discoverDividendCalendar(m); break;
-        case 'sector-rotation':   res = await api.discoverSectorRotation(m); break;
+        case 'ai-picks':          res = await api.discoverAiPicks(m, force); setTab((t) => t || 'buy'); break;
+        case 'events':            res = await api.discoverEvents(m, force); setTab((t) => t || 'all'); break;
+        case 'analyst-ratings':   res = await api.discoverAnalystRatings(m, force); setTab((t) => t || 'upgrades'); break;
+        case 'popular-screeners': res = await api.discoverPopularScreeners(m, force); break;
+        case 'valuation':         res = await api.discoverValuation(m, force); setTab((t) => t || 'undervalued'); break;
+        case 'investor-picks':    res = await api.discoverInvestorPicks(m, force); setTab((t) => t || 'buffett'); break;
+        case 'most-active':       res = await api.discoverMostActive(m, force); break;
+        case 'winners-losers':    res = await api.discoverWinnersLosers(m, force); setTab((t) => t || 'gainers'); break;
+        case 'forecast':          res = await api.discoverForecast(m, force); setTab((t) => t || 'top'); break;
+        case 'earnings-calendar': res = await api.discoverEarningsCalendar(m, force); setTab((t) => t || 'all'); break;
+        case 'dividend-calendar': res = await api.discoverDividendCalendar(m, force); break;
+        case 'sector-rotation':   res = await api.discoverSectorRotation(m, force); break;
         default: res = null;
       }
       setData(res);
@@ -73,9 +94,68 @@ export default function DiscoverDetail() {
     }
   }, [id]);
 
-  useEffect(() => { setLoading(true); load(market); }, [market, load]);
+  const refreshLiveQuotes = useCallback(async () => {
+    if (id === 'sector-rotation') return;
+    const d = dataRef.current;
+    if (!d) return;
+    const symbols = collectDiscoverDetailSymbols(d);
+    if (!symbols.length) return;
+    try {
+      const r = await api.batchLiveQuotes(symbols);
+      const quotes = r.quotes || [];
+      if (!quotes.length) return;
+      setData((prev: any) => (prev ? patchDiscoverDetailQuotes(prev, quotes) : prev));
+    } catch {
+      /* keep last prices */
+    }
+  }, [id]);
 
-  const onRefresh = useCallback(() => { setRefreshing(true); load(market); }, [market, load]);
+  const refreshSectorRotation = useCallback(async () => {
+    if (id !== 'sector-rotation' || !market) return;
+    try {
+      const res = await api.discoverSectorRotation(market, true);
+      setData(res);
+    } catch {
+      /* keep last sector aggregates */
+    }
+  }, [id, market]);
+
+  useFocusInterval(refreshLiveQuotes, LIVE_QUOTE_MS, { immediate: true });
+  useFocusInterval(refreshSectorRotation, SECTOR_REFRESH_MS, { immediate: false });
+
+  const refreshFundamentals = useCallback(async () => {
+    if (id === 'sector-rotation' || !market) return; // handled by SECTOR_REFRESH_MS
+    await load(market, true);
+  }, [id, load, market]);
+
+  useFocusInterval(refreshFundamentals, FUNDAMENTALS_REFRESH_MS, { immediate: false });
+
+  useEffect(() => {
+    if (!market) return;
+    setData(null);
+    setLoading(true);
+    load(market);
+  }, [market, load]);
+
+  const onRefresh = useCallback(() => {
+    if (!market) return;
+    setRefreshing(true);
+    load(market, true);
+  }, [market, load]);
+
+  const selectMarket = useCallback((v: Market) => {
+    setMarket(v);
+    void marketPref.set(v);
+    setLoading(true);
+  }, []);
+
+  if (!market) {
+    return (
+      <SafeAreaView style={styles.safe} edges={['top']} testID={`discover-detail-${id}`}>
+        <LoadingState label="Loading market…" />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']} testID={`discover-detail-${id}`}>
@@ -102,13 +182,13 @@ export default function DiscoverDetail() {
           { value: 'IN', label: '🇮🇳 IN', testID: 'market-IN' },
         ]}
         value={market}
-        onChange={(v) => { setMarket(v as Market); setLoading(true); }}
+        onChange={(v) => selectMarket(v as Market)}
       />
 
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingBottom: 140 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.text} />}
+        refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         {loading ? (
           <LoadingState label="Crunching market data…" />

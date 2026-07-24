@@ -24,6 +24,7 @@ import { theme } from '@/src/theme';
 import { authTheme } from '@/src/auth/authTheme';
 import { useAuth } from '@/src/hooks/useAuth';
 import { useEntitlement } from '@/src/hooks/useEntitlement';
+import AppRefreshControl from '@/src/components/AppRefreshControl';
 import { LOGOUT } from '@/constants/testIds/auth';
 
 const ACCENT = authTheme.colors.primary; // logo blue #1A82FF
@@ -132,16 +133,26 @@ async function openExternal(url: string) {
 export default function ProfileScreen() {
   const router = useRouter();
   const { user, profile, signOut } = useAuth();
-  const { isPremium } = useEntitlement();
+  const { isPremium, refresh: refreshEntitlement } = useEntitlement();
   const [pressedKey, setPressedKey] = useState<string | null>(null);
   const [showShare, setShowShare] = useState(false);
   const [copied, setCopied] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   const name =
     profile?.display_name?.trim() ||
     user?.displayName?.trim() ||
     'Your account';
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refreshEntitlement();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshEntitlement]);
 
   const closeShare = useCallback(() => {
     setShowShare(false);
@@ -321,7 +332,11 @@ export default function ProfileScreen() {
         <View style={styles.iconBtnGhost} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      >
         <Text style={styles.lead}>Account & security</Text>
         <Text style={styles.sub}>Manage your account and get support.</Text>
 

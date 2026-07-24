@@ -4,6 +4,8 @@ Host the API and static web UI on [Render](https://render.com) and the database 
 
 Features and UI are unchanged. Backend URL, CORS, and Firebase are env-driven.
 
+> **SPA deep links:** Expo web is a single-page app. On a Render Static Site you must add a rewrite `/*` → `/index.html` (Blueprint already does this). Missing that rewrite causes a black “Not Found” page when opening `/stock/...` in a new tab.
+
 ---
 
 ## Architecture
@@ -12,7 +14,7 @@ Features and UI are unchanged. Backend URL, CORS, and Firebase are env-driven.
 |-------|--------|------|
 | API | FastAPI (`backend-v2`) + Docker | Render Web Service |
 | Database | MongoDB | MongoDB Atlas (free M0) |
-| Web UI | Expo Router static export (`frontend-v2`) | Render Static Site |
+| Web UI | Expo Router static export (`frontend-v2`) | Render Static Site (SPA rewrite required) |
 | Auth | Firebase Auth | Same Firebase project |
 
 ```
@@ -101,7 +103,15 @@ Upgrading the API off free tier also removes sleep entirely (uses the 750 free h
 ### Manual deploy (without Blueprint)
 
 - **API:** New → Web Service → Docker → root directory `backend-v2` → set env vars above → start via Dockerfile `CMD`.
-- **Web:** New → Static Site → root `frontend-v2` → build `yarn install && yarn build:web` → publish `dist` → rewrite `/*` → `/index.html`.
+- **Web:** New → Static Site → root `frontend-v2` → build `yarn install && yarn build:web` → publish `dist`.
+  Then open the service → **Redirects/Rewrites** → add:
+  - Source: `/*`
+  - Destination: `/index.html`
+  - Action: **Rewrite**
+
+  Without this rewrite, opening `/stock/TSLA` (or any client route) in a new tab shows Render’s black “Not Found” page. In-app navigation still works because it never asks the CDN for that path.
+
+  Optional alternative: deploy as a Node Web Service with start command `yarn start:web` (`scripts/serve-spa.js` includes the SPA fallback). Prefer Static Site + rewrite so the UI does not sleep on the free tier.
 
 ---
 

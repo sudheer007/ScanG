@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, TextInput, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -6,6 +6,7 @@ import { useRouter } from 'expo-router';
 
 import { api } from '@/src/api';
 import { theme, fmtPrice, fmtPct, changeColor } from '@/src/theme';
+import AppRefreshControl from '@/src/components/AppRefreshControl';
 
 interface Result { symbol: string; name: string; market: 'US'|'IN'; price: number; change_pct: number; currency: string }
 
@@ -14,20 +15,39 @@ export default function SearchScreen() {
   const [q, setQ] = useState('');
   const [results, setResults] = useState<Result[]>([]);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const runSearch = useCallback(async (query: string) => {
+    if (!query.trim()) {
+      setResults([]);
+      return;
+    }
+    const r = await api.search(query.trim());
+    setResults(r.results as Result[]);
+  }, []);
 
   useEffect(() => {
     if (!q.trim()) { setResults([]); return; }
     const t = setTimeout(async () => {
       setLoading(true);
       try {
-        const r = await api.search(q.trim());
-        setResults(r.results as Result[]);
+        await runSearch(q);
       } finally {
         setLoading(false);
       }
     }, 250);
     return () => clearTimeout(t);
-  }, [q]);
+  }, [q, runSearch]);
+
+  const onRefresh = useCallback(async () => {
+    if (!q.trim()) return;
+    setRefreshing(true);
+    try {
+      await runSearch(q);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [q, runSearch]);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']} testID="search-screen">
@@ -54,7 +74,10 @@ export default function SearchScreen() {
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 80 }}>
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: 80 }}
+        refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} enabled={!!q.trim()} />}
+      >
         {loading && <ActivityIndicator color={theme.colors.text} style={{ marginTop: 30 }} />}
         {!loading && results.length === 0 && q.length > 0 && (
           <Text style={styles.empty}>No matches for "{q}"</Text>

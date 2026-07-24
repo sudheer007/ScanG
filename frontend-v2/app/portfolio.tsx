@@ -5,7 +5,6 @@ import {
   ScrollView,
   StyleSheet,
   TouchableOpacity,
-  RefreshControl,
   ActivityIndicator,
   Modal,
   Pressable,
@@ -18,6 +17,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as Haptics from 'expo-haptics';
 
 import { api, ApiError, Stock } from '@/src/api';
+import AppRefreshControl from '@/src/components/AppRefreshControl';
 import { theme, changeColor } from '@/src/theme';
 import { authTheme } from '@/src/auth/authTheme';
 import { PortfolioItem } from '@/src/storage-keys';
@@ -53,7 +53,7 @@ type HoldingRow = PortfolioItem & {
 
 const ALLOWED_EXTENSIONS = ['.csv', '.tsv', '.txt', '.pdf', '.jpg', '.jpeg', '.png', '.webp'];
 /** Auto-refresh LTP / P&L while the portfolio screen is focused. */
-const QUOTE_POLL_MS = 5 * 60_000; // 5 min — reduces Yahoo quote pressure vs 1 min
+const QUOTE_POLL_MS = 15_000;
 
 function isAllowedFile(name: string): boolean {
   const lower = name.toLowerCase();
@@ -131,12 +131,32 @@ export default function PortfolioScreen() {
       return;
     }
     try {
-      const r = await api.batchQuotes(list.map((x) => x.symbol));
-      applyQuotes((r.quotes || []) as Stock[]);
+      const r = await api.batchLiveQuotes(list.map((x) => x.symbol));
+      setQuotesBySymbol((prev) => {
+        const next = { ...prev };
+        for (const q of r.quotes || []) {
+          const existing = next[q.symbol];
+          next[q.symbol] = {
+            ...(existing || {
+              symbol: q.symbol,
+              name: q.name,
+              sparkline: [],
+              currency: q.currency,
+            }),
+            price: q.price,
+            change: q.change,
+            change_pct: q.change_pct,
+            volume: q.volume ?? existing?.volume ?? null,
+            currency: q.currency || existing?.currency || 'USD',
+            name: q.name || existing?.name || q.symbol,
+          };
+        }
+        return next;
+      });
     } catch {
       // Keep last quotes on background poll failure.
     }
-  }, [applyQuotes]);
+  }, []);
 
   const load = useCallback(async () => {
     const list = await listPortfolio(user?.uid);
@@ -371,14 +391,13 @@ export default function PortfolioScreen() {
       <ScrollView
         contentContainerStyle={{ paddingBottom: 48 }}
         refreshControl={
-          <RefreshControl
+          <AppRefreshControl
             refreshing={refreshing}
             onRefresh={() => {
               if (importing) return;
               setRefreshing(true);
               load();
             }}
-            tintColor={theme.colors.text}
           />
         }
       >

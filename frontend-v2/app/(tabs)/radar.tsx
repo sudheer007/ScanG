@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, RefreshControl } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -7,6 +7,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { api, Market, RadarResult, Stock, Strategy } from '@/src/api';
 import { theme } from '@/src/theme';
 import { marketPref } from '@/src/storage-keys';
+import AppRefreshControl from '@/src/components/AppRefreshControl';
 import ChipRow from '@/src/components/ChipRow';
 import Sparkline from '@/src/components/Sparkline';
 import AnalystGauge from '@/src/components/AnalystGauge';
@@ -14,7 +15,13 @@ import { EmptyState, ErrorState, LoadingState } from '@/src/components/States';
 import SortableDataTable, { SortableColumn } from '@/src/components/widgets/SortableDataTable';
 import { fmtMetric } from '@/src/screener/engine';
 import { METRIC_BY_KEY } from '@/src/screener/catalog';
+import { useFocusInterval } from '@/src/hooks/useFocusInterval';
+import { mergeLiveQuotes } from '@/src/utils/mergeLiveQuotes';
 
+/** Live LTP poll while a radar strategy result is on screen. */
+const LIVE_QUOTE_MS = 15_000;
+/** Soft-reload strategy scan for RSI / ROE / ranks without pull-to-refresh. */
+const FUNDAMENTALS_REFRESH_MS = 5 * 60_000;
 const ICON_MAP: Record<string, keyof typeof Ionicons.glyphMap> = {
   'trending-up': 'trending-up',
   trophy: 'trophy',
@@ -53,15 +60,27 @@ const upsidePct = (r: Stock) =>
   r.target_mean_price && r.price ? ((r.target_mean_price - r.price) / r.price) * 100 : null;
 
 export default function RadarScreen() {
-  const [market, setMarket] = useState<Market>('US');
+  const [market, setMarket] = useState<Market | null>(() => marketPref.peek());
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [active, setActive] = useState<string | null>(null);
   const [result, setResult] = useState<RadarResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const resultRef = useRef<RadarResult | null>(null);
+  const activeRef = useRef<string | null>(null);
+  const marketRef = useRef<Market | null>(market);
+  resultRef.current = result;
+  activeRef.current = active;
+  marketRef.current = market;
 
-  useEffect(() => { marketPref.get().then(setMarket); }, []);
+  useEffect(() => {
+    let cancelled = false;
+    marketPref.get().then((m) => {
+      if (!cancelled) setMarket(m);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     setLoading(true);
@@ -70,19 +89,23 @@ export default function RadarScreen() {
       .catch((e) => { setError(e.message); setLoading(false); });
   }, []);
 
-  const runStrategy = useCallback(async (key: string, m: Market) => {
+  const runStrategy = useCallback(async (key: string, m: Market, force = false) => {
     setActive(key);
     setError(null);
     const path = `/radar/${key}?market=${m}`;
-    const cached = await api.peek<RadarResult>(path, true);
-    if (cached?.stocks) {
-      setResult(cached);
-      setLoading(false);
+    if (!force) {
+      const cached = await api.peek<RadarResult>(path, true);
+      if (cached?.stocks) {
+        setResult(cached);
+        setLoading(false);
+      } else {
+        setLoading(true);
+      }
     } else {
       setLoading(true);
     }
     try {
-      const r = await api.radar(key, m);
+      const r = await api.radar(key, m, force);
       setResult(r);
     } catch (e: any) {
       setError(e?.message || 'Failed to run scan');
@@ -92,7 +115,67 @@ export default function RadarScreen() {
     }
   }, []);
 
-  const onRefresh = () => { if (active) { setRefreshing(true); runStrategy(active, market); } };
+  const refreshVisibleQuotes = useCallback(async () => {
+    const stocks = resultRef.current?.stocks;
+    if (!stocks?.length) return;
+    try {
+      const r = await api.batchLiveQuotes(stocks.slice(0, 49).map((s) => s.symbol).filter(Boolean));
+      const quotes = r.quotes || [];
+      if (!quotes.length) return;
+      setResult((prev) => {
+        if (!prev?.stocks?.length) return prev;
+        return { ...prev, stocks: mergeLiveQuotes(prev.stocks, quotes) };
+      });
+    } catch {
+      /* keep last prices */
+    }
+  }, []);
+
+  const refreshFundamentals = useCallback(async () => {
+    const key = activeRef.current;
+    const mkt = marketRef.current;
+    if (!key || !mkt) return;
+    try {
+      const r = await api.radar(key, mkt, true);
+      setResult((prev) => {
+        if (!prev?.stocks?.length) return r;
+        const bySym = new Map(prev.stocks.map((s) => [s.symbol, s]));
+        return {
+          ...r,
+          stocks: (r.stocks || []).map((s) => {
+            const live = bySym.get(s.symbol);
+            if (!live) return s;
+            return {
+              ...s,
+              price: live.price ?? s.price,
+              change: live.change ?? s.change,
+              change_pct: live.change_pct ?? s.change_pct,
+              volume: live.volume ?? s.volume,
+            };
+          }),
+        };
+      });
+    } catch {
+      /* keep last fundamentals */
+    }
+  }, []);
+
+  useFocusInterval(refreshVisibleQuotes, LIVE_QUOTE_MS, { immediate: true });
+  useFocusInterval(refreshFundamentals, FUNDAMENTALS_REFRESH_MS, { immediate: false });
+
+  const onRefresh = () => {
+    if (!market) return;
+    if (active) {
+      setRefreshing(true);
+      runStrategy(active, market, true);
+      return;
+    }
+    setRefreshing(true);
+    api.strategies(true)
+      .then((d) => { setStrategies(d.strategies); setError(null); })
+      .catch((e) => { setError(e.message); })
+      .finally(() => setRefreshing(false));
+  };
   const exitDetail = () => { setActive(null); setResult(null); };
 
   const currency = result?.currency || (market === 'IN' ? 'INR' : 'USD');
@@ -148,6 +231,14 @@ export default function RadarScreen() {
     return [...base, ...extras];
   }, [active, currency]);
 
+  if (!market) {
+    return (
+      <SafeAreaView style={styles.safe} edges={['top']} testID="radar-screen">
+        <LoadingState label="Loading market…" />
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']} testID="radar-screen">
       <View style={styles.header}>
@@ -177,14 +268,20 @@ export default function RadarScreen() {
         ]}
         value={market}
         onChange={(v) => {
-          setMarket(v as Market);
-          marketPref.set(v as Market);
-          if (active) runStrategy(active, v as Market);
+          const next = v as Market;
+          setMarket(next);
+          void marketPref.set(next);
+          setResult(null);
+          if (active) runStrategy(active, next);
         }}
       />
 
       {!active ? (
-        <ScrollView style={styles.scroll} contentContainerStyle={{ paddingBottom: 120 }}>
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={{ paddingBottom: 120 }}
+          refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        >
           {loading ? (
             <LoadingState label="Loading strategies…" />
           ) : error ? (
@@ -235,7 +332,7 @@ export default function RadarScreen() {
           <ScrollView
             style={{ flex: 1 }}
             contentContainerStyle={{ paddingBottom: 120, flexGrow: 1 }}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.text} />}
+            refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           >
             <View style={{ paddingHorizontal: theme.spacing.sm, width: '100%' }}>
               <SortableDataTable

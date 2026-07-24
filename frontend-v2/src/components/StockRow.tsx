@@ -1,9 +1,11 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, useWindowDimensions } from 'react-native';
 import { useRouter } from 'expo-router';
 import Sparkline from './Sparkline';
 import { theme, fmtPrice, fmtPct, changeColor } from '@/src/theme';
 import { Stock } from '@/src/api';
+
+const LAPTOP_MIN = 768;
 
 interface Props {
   stock: Stock;
@@ -14,8 +16,11 @@ interface Props {
 
 export default function StockRow({ stock, rightBadges, testIDPrefix = 'stock-row', hideSparkline = false }: Props) {
   const router = useRouter();
+  const { width } = useWindowDimensions();
+  const isLaptop = width >= LAPTOP_MIN;
   const symbolShort = stock.symbol.replace('.NS', '');
   const ccy = stock.currency || (stock.symbol.endsWith('.NS') ? 'INR' : 'USD');
+  const showSpark = !hideSparkline;
 
   return (
     <TouchableOpacity
@@ -39,13 +44,13 @@ export default function StockRow({ stock, rightBadges, testIDPrefix = 'stock-row
         )}
       </View>
 
-      {!hideSparkline && (
+      {showSpark && (
         <View style={styles.spark}>
           <Sparkline data={stock.sparkline || []} width={70} height={26} />
         </View>
       )}
 
-      <View style={styles.right}>
+      <View style={[styles.right, isLaptop && showSpark && styles.rightLaptop]}>
         <Text style={styles.price}>{fmtPrice(stock.price, ccy)}</Text>
         <Text style={[styles.change, { color: changeColor(stock.change_pct) }]}>
           {fmtPct(stock.change_pct)}
@@ -64,11 +69,12 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: theme.colors.divider,
   },
-  left: { flex: 1, paddingRight: theme.spacing.sm },
+  left: { flex: 1, minWidth: 0, paddingRight: theme.spacing.sm },
   symbol: { color: theme.colors.text, fontSize: 15, fontWeight: '600', letterSpacing: 0.2 },
   name: { color: theme.colors.textMuted, fontSize: 12, marginTop: 2 },
   spark: { width: 70, marginHorizontal: theme.spacing.sm },
   right: { alignItems: 'flex-end', minWidth: 84 },
+  rightLaptop: { flex: 1 },
   price: { color: theme.colors.text, fontSize: 14, fontWeight: '600', fontVariant: ['tabular-nums'] },
   change: { fontSize: 12, fontWeight: '600', marginTop: 2, fontVariant: ['tabular-nums'] },
   badgeRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 6, gap: 6 },

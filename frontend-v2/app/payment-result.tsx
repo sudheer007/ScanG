@@ -15,6 +15,7 @@ import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 
 import { theme } from '@/src/theme';
 import { downloadReceipt } from '@/src/payments/receipt';
+import AppRefreshControl from '@/src/components/AppRefreshControl';
 
 const ACCENT = '#7CD3FF';
 const ACCENT_DARK = '#1A82FF';
@@ -55,10 +56,16 @@ export default function PaymentResultScreen() {
     reason?: string;
   }>();
   const [downloading, setDownloading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   const success = (params.status || 'success') === 'success';
   const amountLabel = useMemo(() => formatInr(params.amount), [params.amount]);
   const when = useMemo(() => formatNow(), []);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 350);
+  }, []);
 
   const onContactSupport = async () => {
     const subject = encodeURIComponent('ScanG Payment Support');
@@ -110,7 +117,11 @@ export default function PaymentResultScreen() {
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      >
         <View style={styles.statusWrap}>
           {success ? (
             <View style={styles.statusOkCircle}>

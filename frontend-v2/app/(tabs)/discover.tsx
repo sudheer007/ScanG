@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, RefreshControl } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -7,22 +7,44 @@ import { useRouter } from 'expo-router';
 import { api, Market } from '@/src/api';
 import { theme, fmtPct, changeColor } from '@/src/theme';
 import { marketPref } from '@/src/storage-keys';
+import AppRefreshControl from '@/src/components/AppRefreshControl';
 import ChipRow from '@/src/components/ChipRow';
 import { LoadingState, ErrorState } from '@/src/components/States';
 import WidgetCard from '@/src/components/widgets/WidgetCard';
 import MiniRow from '@/src/components/widgets/MiniRow';
 import RatingBar from '@/src/components/widgets/RatingBar';
+import { useFocusInterval } from '@/src/hooks/useFocusInterval';
+import {
+  collectDiscoverFeedSymbols,
+  patchDiscoverExtraQuotes,
+  patchDiscoverFeedQuotes,
+} from '@/src/utils/mergeLiveQuotes';
+
+/** Live LTP poll for Discover feed stock rows (same cadence as Markets / Screener). */
+const LIVE_QUOTE_MS = 15_000;
+/** Soft-reload feed + extras for scores / RSI / ROE without pull-to-refresh. */
+const FUNDAMENTALS_REFRESH_MS = 5 * 60_000;
 
 export default function DiscoverScreen() {
   const router = useRouter();
-  const [market, setMarket] = useState<Market>('US');
+  const [market, setMarket] = useState<Market | null>(() => marketPref.peek());
   const [data, setData] = useState<any | null>(null);
   const [extra, setExtra] = useState<any>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const dataRef = useRef<any | null>(null);
+  const extraRef = useRef<any>({});
+  dataRef.current = data;
+  extraRef.current = extra;
 
-  useEffect(() => { marketPref.get().then(setMarket); }, []);
+  useEffect(() => {
+    let cancelled = false;
+    marketPref.get().then((m) => {
+      if (!cancelled) setMarket(m);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   const load = useCallback(async (m: Market, force = false) => {
     try {
@@ -52,16 +74,58 @@ export default function DiscoverScreen() {
     }
   }, []);
 
+  const refreshFeedQuotes = useCallback(async () => {
+    const symbols = collectDiscoverFeedSymbols(dataRef.current, extraRef.current);
+    if (!symbols.length) return;
+    try {
+      const r = await api.batchLiveQuotes(symbols);
+      const quotes = r.quotes || [];
+      if (!quotes.length) return;
+      setData((prev: any) => (prev ? patchDiscoverFeedQuotes(prev, quotes) : prev));
+      setExtra((prev: any) => patchDiscoverExtraQuotes(prev, quotes));
+    } catch {
+      /* keep last prices */
+    }
+  }, []);
+
+  useFocusInterval(refreshFeedQuotes, LIVE_QUOTE_MS, { immediate: true });
+
+  const refreshFundamentals = useCallback(async () => {
+    if (!market) return;
+    await load(market, true);
+  }, [load, market]);
+
+  useFocusInterval(refreshFundamentals, FUNDAMENTALS_REFRESH_MS, { immediate: false });
+
   useEffect(() => {
+    if (!market) return;
     setExtra({});
+    setData(null);
     setLoading(true);
     load(market);
-    marketPref.set(market);
   }, [market, load]);
 
-  const onRefresh = useCallback(() => { setRefreshing(true); setExtra({}); load(market, true); }, [market, load]);
+  const onRefresh = useCallback(() => {
+    if (!market) return;
+    setRefreshing(true);
+    setExtra({});
+    load(market, true);
+  }, [market, load]);
+
+  const selectMarket = useCallback((v: Market) => {
+    setMarket(v);
+    void marketPref.set(v);
+  }, []);
 
   const w = data?.widgets || {};
+
+  if (!market) {
+    return (
+      <SafeAreaView style={styles.safe} edges={['top']} testID="discover-screen">
+        <LoadingState label="Loading market…" />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']} testID="discover-screen">
@@ -82,13 +146,13 @@ export default function DiscoverScreen() {
           { value: 'IN', label: '🇮🇳 India', testID: 'market-IN' },
         ]}
         value={market}
-        onChange={(v) => setMarket(v as Market)}
+        onChange={(v) => selectMarket(v as Market)}
       />
 
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={{ paddingBottom: 140, paddingTop: 8 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.text} />}
+        refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         {loading ? (
           <LoadingState label="Building your Discover feed…" />

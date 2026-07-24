@@ -29,6 +29,8 @@ services:
       - key: INGESTION_ADMIN_KEY
         sync: false
 
+  # Static Site + SPA rewrite so deep links (/stock/TSLA, etc.) serve index.html.
+  # If you created the site manually, add the same rewrite in Dashboard → Redirects/Rewrites.
   - type: web
     name: scang-web
     runtime: static

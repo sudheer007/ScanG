@@ -32,15 +32,15 @@ from ingestion.data_access import (
 
 log = logging.getLogger(__name__)
 
-# Caches — longer TTLs reduce Yahoo fan-out on Render after cold wake.
-# Summary/chart layers are already long-lived; universe rebuilds mostly reassemble them.
-QUOTE_BATCH_CACHE = TTLCache(maxsize=8, ttl=5 * 60)          # 5 min for full quote batch
-CHART_CACHE = TTLCache(maxsize=4000, ttl=10 * 60)             # 10 min charts
-SUMMARY_CACHE = TTLCache(maxsize=4000, ttl=60 * 60)           # 60 min fundamentals
+# Caches — short TTLs on price paths for near-live quotes; long TTLs on slow layers.
+# Summary stays long-lived; universe rebuilds mostly reassemble chart/summary caches.
+QUOTE_BATCH_CACHE = TTLCache(maxsize=8, ttl=30)               # 30s full quote batch (price)
+CHART_CACHE = TTLCache(maxsize=4000, ttl=5 * 60)              # 5 min charts
+SUMMARY_CACHE = TTLCache(maxsize=4000, ttl=30 * 60)           # 30 min fundamentals
 HISTORY_CACHE = TTLCache(maxsize=2000, ttl=5 * 60)            # 5 min OHLCV history
-BUNDLE_CACHE = TTLCache(maxsize=4000, ttl=10 * 60)            # 10 min per-symbol
-UNIVERSE_BUNDLE_CACHE = TTLCache(maxsize=8, ttl=8 * 60)       # 8 min full market (Discover/Radar/Screener)
-OVERVIEW_CACHE = TTLCache(maxsize=8, ttl=90)                  # 90s Markets landing
+BUNDLE_CACHE = TTLCache(maxsize=4000, ttl=30)                 # 30s per-symbol (price)
+UNIVERSE_BUNDLE_CACHE = TTLCache(maxsize=8, ttl=60)           # 60s full market (Discover/Radar/Screener)
+OVERVIEW_CACHE = TTLCache(maxsize=8, ttl=30)                  # 30s Markets landing
 
 # Single-flight: concurrent callers share one in-progress universe build per market.
 _universe_inflight: Dict[str, "asyncio.Future[List[Dict[str, Any]]]"] = {}
@@ -765,20 +765,36 @@ async def get_live_quote(symbol: str) -> Optional[Dict[str, Any]]:
     `_yh_quote_batch` only caches batches of 50+ symbols, so a single-symbol
     call always hits Yahoo.
     """
-    quote_map = await asyncio.to_thread(_yh_quote_batch, [symbol])
-    q = quote_map.get(symbol) or {}
-    price = _safe(q.get("regularMarketPrice"))
-    if price is None:
-        return None
-    return {
-        "symbol": symbol,
-        "name": q.get("longName") or q.get("shortName") or symbol,
-        "price": price,
-        "change": _safe(q.get("regularMarketChange")),
-        "change_pct": _safe(q.get("regularMarketChangePercent")),
-        "volume": _safe(q.get("regularMarketVolume")),
-        "currency": q.get("currency") or ("INR" if symbol.endswith(".NS") or symbol == "^NSEI" else "USD"),
-    }
+    quotes = await get_live_quotes([symbol])
+    return quotes[0] if quotes else None
+
+
+async def get_live_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
+    """Multi-symbol lightweight live quotes (price/change only, no sparklines).
+
+    Keeps baskets under 50 symbols so `_yh_quote_batch` skips the long-lived
+    universe cache and hits Yahoo every call — same freshness as get_live_quote.
+    """
+    syms = [s.strip() for s in symbols if s and s.strip()][:49]
+    if not syms:
+        return []
+    quote_map = await asyncio.to_thread(_yh_quote_batch, syms)
+    out: List[Dict[str, Any]] = []
+    for sym in syms:
+        q = quote_map.get(sym) or {}
+        price = _safe(q.get("regularMarketPrice"))
+        if price is None:
+            continue
+        out.append({
+            "symbol": sym,
+            "name": q.get("longName") or q.get("shortName") or sym,
+            "price": price,
+            "change": _safe(q.get("regularMarketChange")),
+            "change_pct": _safe(q.get("regularMarketChangePercent")),
+            "volume": _safe(q.get("regularMarketVolume")),
+            "currency": q.get("currency") or ("INR" if sym.endswith(".NS") or sym == "^NSEI" else "USD"),
+        })
+    return out
 
 
 async def get_raw_quotes(symbols: List[str]) -> Dict[str, Dict[str, Any]]:

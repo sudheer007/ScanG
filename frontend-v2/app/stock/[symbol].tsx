@@ -2,12 +2,14 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, ActivityIndicator, Dimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Href, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 
 import { api, HistoryPoint, Stock, StockEvents, NewsItem } from '@/src/api';
 import { theme, fmtPrice, fmtPct, fmtMarketCap, changeColor, fmtNum } from '@/src/theme';
 import { addWatchlistItem, hasWatchlistItem, removeWatchlistItem } from '@/src/services/watchlistService';
 import { useAuth } from '@/src/hooks/useAuth';
+import { useFocusInterval } from '@/src/hooks/useFocusInterval';
+import AppRefreshControl from '@/src/components/AppRefreshControl';
 import PriceChart from '@/src/components/PriceChart';
 import EventsWidget from '@/src/components/EventsWidget';
 import NewsList from '@/src/components/NewsList';
@@ -23,6 +25,11 @@ const PERIODS: { label: string; period: string; interval: string }[] = [
   { label: '5Y', period: '5y', interval: '1wk' },
 ];
 
+/** Live LTP poll while the stock screen is focused. */
+const LIVE_QUOTE_MS = 15_000;
+/** Soft-reload bundle / chart / extras for RSI, ROE, etc. (prices stay on 15s poll). */
+const FUNDAMENTALS_REFRESH_MS = 5 * 60_000;
+
 export default function StockDetailScreen() {
   const { symbol } = useLocalSearchParams<{ symbol: string }>();
   const router = useRouter();
@@ -32,16 +39,26 @@ export default function StockDetailScreen() {
   const [history, setHistory] = useState<HistoryPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [chartLoading, setChartLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [inList, setInList] = useState(false);
   const [events, setEvents] = useState<StockEvents | null>(null);
   const [news, setNews] = useState<NewsItem[]>([]);
 
-  const load = useCallback(async () => {
+  const goBack = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+    // Deep link / cold open / replaced route — no history stack.
+    router.replace('/(tabs)' as Href);
+  }, [router]);
+
+  const load = useCallback(async (force = false) => {
     if (!symbol) return;
     try {
       setError(null);
-      const s = await api.stock(symbol);
+      const s = await api.stock(symbol, force);
       setStock(s);
       setInList(await hasWatchlistItem(symbol, user?.uid));
     } catch (e: any) {
@@ -51,25 +68,102 @@ export default function StockDetailScreen() {
     }
   }, [symbol, user?.uid]);
 
-  const loadHistory = useCallback(async () => {
+  const loadHistory = useCallback(async (force = false) => {
     if (!symbol) return;
     setChartLoading(true);
     try {
       const p = PERIODS[periodIdx];
-      const r = await api.history(symbol, p.period, p.interval);
+      const r = await api.history(symbol, p.period, p.interval, force);
       setHistory(r.points);
     } finally {
       setChartLoading(false);
     }
   }, [symbol, periodIdx]);
 
-  useEffect(() => { setLoading(true); load(); }, [load]);
-  useEffect(() => { loadHistory(); }, [loadHistory]);
-  useEffect(() => {
+  const loadExtras = useCallback(async (force = false) => {
     if (!symbol) return;
-    api.stockEvents(symbol).then(setEvents).catch(() => {});
-    api.newsStock(symbol).then((r) => setNews(r.news || [])).catch(() => {});
+    try {
+      const [ev, n] = await Promise.all([
+        api.stockEvents(symbol, force),
+        api.newsStock(symbol, force),
+      ]);
+      setEvents(ev);
+      setNews(n.news || []);
+    } catch {
+      /* keep previous extras */
+    }
   }, [symbol]);
+
+  const refreshQuote = useCallback(async () => {
+    if (!symbol) return;
+    try {
+      const q = await api.liveQuote(symbol);
+      setStock((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          price: q.price,
+          change: q.change,
+          change_pct: q.change_pct,
+          volume: q.volume ?? prev.volume,
+          currency: q.currency || prev.currency,
+        };
+      });
+    } catch {
+      /* keep last quote on background poll failure */
+    }
+  }, [symbol]);
+
+  const refreshFundamentals = useCallback(async () => {
+    if (!symbol) return;
+    try {
+      const p = PERIODS[periodIdx];
+      const [s, hist] = await Promise.all([
+        api.stock(symbol, true),
+        api.history(symbol, p.period, p.interval, true),
+        loadExtras(true),
+      ]);
+      setHistory(hist.points);
+      setStock((prev) => {
+        if (!prev) return s;
+        // Keep the fresher live LTP if poll beat this bundle fetch.
+        return {
+          ...s,
+          price: prev.price ?? s.price,
+          change: prev.change ?? s.change,
+          change_pct: prev.change_pct ?? s.change_pct,
+          volume: prev.volume ?? s.volume,
+        };
+      });
+    } catch {
+      /* keep last fundamentals */
+    }
+  }, [symbol, periodIdx, loadExtras]);
+
+  // Fresh bundle when screen gains focus (no spinner flash if already loaded).
+  useFocusEffect(
+    useCallback(() => {
+      void load(true);
+      void loadExtras(true);
+    }, [load, loadExtras]),
+  );
+  useFocusInterval(refreshQuote, LIVE_QUOTE_MS, { immediate: true });
+  useFocusInterval(refreshFundamentals, FUNDAMENTALS_REFRESH_MS, { immediate: false });
+  useEffect(() => {
+    setLoading(true);
+    setStock(null);
+    setError(null);
+  }, [symbol]);
+  useEffect(() => { loadHistory(); }, [loadHistory]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([load(true), loadHistory(true), loadExtras(true)]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [load, loadHistory, loadExtras]);
 
   const toggleWatch = async () => {
     if (!stock) return;
@@ -88,7 +182,7 @@ export default function StockDetailScreen() {
   if (loading) {
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
-        <Header onBack={() => router.back()} title={symbol || ''} subtitle="" />
+        <Header onBack={goBack} title={symbol || ''} subtitle="" />
         <LoadingState />
       </SafeAreaView>
     );
@@ -96,8 +190,8 @@ export default function StockDetailScreen() {
   if (error || !stock) {
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
-        <Header onBack={() => router.back()} title={symbol || ''} subtitle="" />
-        <ErrorState message={error || 'Stock not found'} onRetry={load} />
+        <Header onBack={goBack} title={symbol || ''} subtitle="" />
+        <ErrorState message={error || 'Stock not found'} onRetry={() => { setLoading(true); void load(true); }} />
       </SafeAreaView>
     );
   }
@@ -110,7 +204,7 @@ export default function StockDetailScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['top']} testID="stock-detail-screen">
       <Header
-        onBack={() => router.back()}
+        onBack={goBack}
         title={symbolShort}
         subtitle={stock.name}
         right={
@@ -129,7 +223,10 @@ export default function StockDetailScreen() {
         }
       />
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 120 }}>
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: 120 }}
+        refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      >
         <View style={styles.priceBlock}>
           <Text style={styles.price}>{fmtPrice(stock.price, ccy)}</Text>
           <Text style={[styles.change, { color: changeColor(stock.change_pct) }]}>
@@ -219,7 +316,14 @@ export default function StockDetailScreen() {
 function Header({ onBack, title, subtitle, right }: { onBack: () => void; title: string; subtitle: string; right?: React.ReactNode }) {
   return (
     <View style={styles.header}>
-      <TouchableOpacity testID="back-btn" onPress={onBack} style={styles.iconBtn}>
+      <TouchableOpacity
+        testID="back-btn"
+        onPress={onBack}
+        style={styles.iconBtn}
+        hitSlop={12}
+        accessibilityRole="button"
+        accessibilityLabel="Go back"
+      >
         <Ionicons name="chevron-back" size={22} color={theme.colors.text} />
       </TouchableOpacity>
       <View style={{ flex: 1 }}>
@@ -279,7 +383,17 @@ function TechBadge({ label, value }: { label: string; value: string }) {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: theme.colors.bg },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: theme.spacing.lg, paddingTop: theme.spacing.sm, paddingBottom: theme.spacing.md, gap: 10 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing.lg,
+    paddingTop: theme.spacing.sm,
+    paddingBottom: theme.spacing.md,
+    gap: 10,
+    zIndex: 20,
+    elevation: 20,
+    backgroundColor: theme.colors.bg,
+  },
   iconBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: theme.colors.bg2, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: theme.colors.border },
   hTitle: { color: theme.colors.text, fontSize: 18, fontWeight: '700' },
   hSubtitle: { color: theme.colors.textMuted, fontSize: 12, marginTop: 2 },

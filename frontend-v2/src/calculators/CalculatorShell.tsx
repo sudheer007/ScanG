@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -10,6 +10,7 @@ import { DonutChart } from '@/src/calculators/DonutChart';
 import { ValueSlider } from '@/src/calculators/ValueSlider';
 import { fmtInrCompact, type CalcResult } from '@/src/calculators/calcMath';
 import { authTheme } from '@/src/auth/authTheme';
+import AppRefreshControl from '@/src/components/AppRefreshControl';
 
 const SIP_BLUE_START = '#061D3E';
 const SIP_BLUE_END = '#040A16';
@@ -48,9 +49,15 @@ export function CalculatorShell({
   totalLabel = 'Total Wealth',
 }: Props) {
   const router = useRouter();
+  const [refreshing, setRefreshing] = useState(false);
   const principalRatio =
     result.maturity > 0 ? clamp(result.invested / result.maturity, 0, 1) : 1;
   const centerPct = `${Math.round(result.returnsPct)}%`;
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 350);
+  };
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']} testID={testID}>
@@ -78,7 +85,7 @@ export function CalculatorShell({
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
-          bounces={false}
+          refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
           <View style={styles.resultsPanel}>
             <View style={styles.resultsRow}>

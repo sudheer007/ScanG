@@ -18,6 +18,7 @@ import { theme } from '@/src/theme';
 import { authTheme } from '@/src/auth/authTheme';
 import { useAuth } from '@/src/hooks/useAuth';
 import { useEntitlement } from '@/src/hooks/useEntitlement';
+import AppRefreshControl from '@/src/components/AppRefreshControl';
 import {
   api,
   ApiError,
@@ -46,19 +47,23 @@ export default function SubscribeScreen() {
   const [selectedId, setSelectedId] = useState<string>('premium_yearly');
   const [loadingPlans, setLoadingPlans] = useState(true);
   const [paying, setPaying] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const loadPlans = useCallback(async () => {
+    const res = await api.getPlans();
+    setPlans(res.items || []);
+    if (res.items?.some((p) => p.id === 'premium_yearly')) {
+      setSelectedId('premium_yearly');
+    } else if (res.items?.[0]) {
+      setSelectedId(res.items[0].id);
+    }
+  }, []);
 
   useEffect(() => {
     let active = true;
     (async () => {
       try {
-        const res = await api.getPlans();
-        if (!active) return;
-        setPlans(res.items || []);
-        if (res.items?.some((p) => p.id === 'premium_yearly')) {
-          setSelectedId('premium_yearly');
-        } else if (res.items?.[0]) {
-          setSelectedId(res.items[0].id);
-        }
+        await loadPlans();
       } catch (e: any) {
         if (active) {
           Alert.alert('Unable to load plans', e?.message || 'Please try again.');
@@ -70,7 +75,18 @@ export default function SubscribeScreen() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [loadPlans]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([loadPlans(), refresh()]);
+    } catch (e: any) {
+      Alert.alert('Unable to refresh', e?.message || 'Please try again.');
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadPlans, refresh]);
 
   const selected = plans.find((p) => p.id === selectedId) || plans[0];
 
@@ -193,7 +209,11 @@ export default function SubscribeScreen() {
         <View style={styles.iconBtnGhost} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      >
         <Text style={styles.lead}>Unlock ScanG Premium</Text>
         <Text style={styles.sub}>
           Secure recurring billing via Razorpay. Cancel anytime from Manage Subscription.

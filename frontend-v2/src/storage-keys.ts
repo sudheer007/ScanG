@@ -59,12 +59,23 @@ export const savedScreens = {
   },
 };
 
+let marketMemory: 'US' | 'IN' | null = null;
+
 export const marketPref = {
-  async get(): Promise<'US' | 'IN'> {
-    const v = await storage.getItem(MARKET_KEY);
-    return (v as 'US' | 'IN') || 'US';
+  /** In-memory last market — avoids US→IN flash on remount within the same session. */
+  peek(): 'US' | 'IN' | null {
+    return marketMemory;
   },
+
+  async get(): Promise<'US' | 'IN'> {
+    if (marketMemory) return marketMemory;
+    const v = await storage.getItem(MARKET_KEY);
+    marketMemory = (v === 'IN' || v === 'US') ? v : 'US';
+    return marketMemory;
+  },
+
   async set(m: 'US' | 'IN') {
+    marketMemory = m;
     await storage.setItem(MARKET_KEY, m);
   },
 };

@@ -231,12 +231,43 @@ async def markets_overview(market: str = Query("US")):
 
 
 # ---------- Stocks ----------
+# Static batch paths MUST be registered before `/stocks/{symbol}/…`
+# or FastAPI treats `batch` as a symbol (e.g. `/stocks/batch/live` → 404).
+@api_router.get("/stocks/batch/quotes")
+async def stock_batch_quotes(symbols: str = Query(...)):
+    """Comma-separated symbols. Used for watchlist refresh."""
+    sym_list = [s.strip() for s in symbols.split(",") if s.strip()]
+    if not sym_list:
+        return {"quotes": []}
+    quotes = await ss.get_quotes(sym_list[:50])
+    return {"quotes": quotes}
+
+
+@api_router.get("/stocks/batch/live")
+async def stock_batch_live(symbols: str = Query(...)):
+    """Lightweight live prices for on-screen list polling (no sparklines)."""
+    sym_list = [s.strip() for s in symbols.split(",") if s.strip()]
+    if not sym_list:
+        return {"quotes": []}
+    quotes = await ss.get_live_quotes(sym_list)
+    return {"quotes": quotes}
+
+
 @api_router.get("/stocks/{symbol}")
 async def stock_detail(symbol: str):
     bundle = await ss.get_bundle(symbol)
     if bundle.get("error"):
         raise HTTPException(status_code=404, detail=f"Stock {symbol} not found")
     return bundle
+
+
+@api_router.get("/stocks/{symbol}/live")
+async def stock_live_quote(symbol: str):
+    """Lightweight fresh quote for on-screen polling (bypasses bundle cache)."""
+    quote = await ss.get_live_quote(symbol)
+    if not quote:
+        raise HTTPException(status_code=404, detail=f"Quote for {symbol} not found")
+    return quote
 
 
 @api_router.get("/stocks/{symbol}/history")
@@ -259,16 +290,6 @@ async def stock_history(
 async def stock_events(symbol: str):
     """Per-stock events: analyst upgrade/downgrade history, earnings history & surprises, calendar."""
     return await ss.get_stock_events(symbol)
-
-
-@api_router.get("/stocks/batch/quotes")
-async def stock_batch_quotes(symbols: str = Query(...)):
-    """Comma-separated symbols. Used for watchlist refresh."""
-    sym_list = [s.strip() for s in symbols.split(",") if s.strip()]
-    if not sym_list:
-        return {"quotes": []}
-    quotes = await ss.get_quotes(sym_list[:50])
-    return {"quotes": quotes}
 
 
 # ---------- Radar Strategies ----------

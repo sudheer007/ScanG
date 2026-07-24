@@ -19,7 +19,7 @@ from stock_universe import currency
 
 log = logging.getLogger(__name__)
 
-NEWS_CACHE = TTLCache(maxsize=1024, ttl=15 * 60)  # 15 min
+NEWS_CACHE = TTLCache(maxsize=1024, ttl=10 * 60)  # 10 min
 
 SEARCH_URL = "https://query1.finance.yahoo.com/v1/finance/search"
 

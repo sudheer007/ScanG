@@ -1,8 +1,10 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, useWindowDimensions } from 'react-native';
 import { useRouter } from 'expo-router';
 import Sparkline from '../Sparkline';
 import { theme, fmtPrice, fmtPct, changeColor } from '@/src/theme';
+
+const LAPTOP_MIN = 768;
 
 interface Props {
   symbol: string;
@@ -20,6 +22,9 @@ interface Props {
 
 export default function MiniRow({ symbol, name, price, changePct, currency, sparkline, rightLabel, rightValue, rightTone, onPress, compact }: Props) {
   const router = useRouter();
+  const { width } = useWindowDimensions();
+  const isLaptop = width >= LAPTOP_MIN;
+  const showSpark = !!(sparkline && sparkline.length > 0);
   const short = symbol.replace('.NS', '');
   return (
     <TouchableOpacity
@@ -31,12 +36,12 @@ export default function MiniRow({ symbol, name, price, changePct, currency, spar
         <Text style={styles.symbol} numberOfLines={1}>{short}</Text>
         {name ? <Text style={styles.name} numberOfLines={1}>{name}</Text> : null}
       </View>
-      {sparkline && sparkline.length > 0 ? (
+      {showSpark ? (
         <View style={styles.spark}>
-          <Sparkline data={sparkline} width={56} height={20} />
+          <Sparkline data={sparkline!} width={56} height={20} />
         </View>
       ) : null}
-      <View style={styles.right}>
+      <View style={[styles.right, isLaptop && showSpark && styles.rightLaptop]}>
         {price != null ? <Text style={styles.price}>{fmtPrice(price, currency || 'USD')}</Text> : null}
         {rightLabel || rightValue ? (
           <View style={styles.pillsRow}>
@@ -64,11 +69,12 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     gap: 10,
   },
-  left: { flex: 1 },
+  left: { flex: 1, minWidth: 0 },
   symbol: { color: theme.colors.text, fontSize: 13, fontWeight: '700' },
   name: { color: theme.colors.textMuted, fontSize: 11, marginTop: 1 },
   spark: { width: 56 },
   right: { alignItems: 'flex-end', minWidth: 78 },
+  rightLaptop: { flex: 1 },
   price: { color: theme.colors.text, fontSize: 13, fontWeight: '600', fontVariant: ['tabular-nums'] },
   change: { fontSize: 11, fontWeight: '600', marginTop: 1, fontVariant: ['tabular-nums'] },
   pillsRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },

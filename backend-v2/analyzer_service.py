@@ -23,7 +23,7 @@ from sector_utils import (
 from news_service import news_sentiment_summary
 from ingestion.data_access import analyzer_section_sources
 
-ANALYZER_CACHE = TTLCache(maxsize=2000, ttl=5 * 60)  # 5 min computed payload
+ANALYZER_CACHE = TTLCache(maxsize=2000, ttl=30)  # 30s computed payload (tracks bundle price)
 
 
 # ----------------------------------------------------------------------

@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  RefreshControl,
   TouchableOpacity,
   Dimensions,
 } from 'react-native';
@@ -13,6 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 
 import { api, type NiftyDirection, type NiftyPredictResponse, type NiftySignals } from '@/src/api';
+import AppRefreshControl from '@/src/components/AppRefreshControl';
 import ChipRow from '@/src/components/ChipRow';
 import Sparkline from '@/src/components/Sparkline';
 import ScoreBar from '@/src/components/widgets/ScoreBar';
@@ -209,7 +209,7 @@ export default function NiftyPulseScreen() {
       <ScrollView
         contentContainerStyle={styles.scroll}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.text} />
+          <AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
         showsVerticalScrollIndicator={false}
       >

@@ -1,0 +1,49 @@
+{
+  "summary": "Tested the redesigned SCREENER tab (Radar) end-to-end. Backend: NEW /api/screener/universe endpoint returns ALL 19 new fields (open, day_high, day_low, prev_close, volume, avg_volume, rvol, enterprise_value, ev_ebitda, ev_sales, book_value_per_share, payout_ratio, atr, from_52w_low_pct, one_year_change_pct, ytd_pct, p_fcf, shares_outstanding, float_shares) on every stock for both US (488) and IN (508) markets — 17/19 pytest tests pass (the 2 failures are pre-existing yfinance issues unrelated to the screener rewrite). Frontend (mobile 390x844): Screener loads with 488 US stocks header, market US/IN toggle works, mode-quick/mode-custom segmented control works, all 10 preset cards render with non-zero live match counts (Quality=64, Value=49, Growth=34, Dividend=33, Oversold=41, MegaCap=39, Profit=78, Breakout=3, GARP=76, CashRich=160). Tapping preset-quality applies filters and shows the screener-table with 2 chips visible (Return on Equity ≥ 18 + Total Debt to Equity ≤ 80); chip remove works; clear-filters returns to grid. FilterSheet opens via open-filters AND edit-filters AND auto-open on mode-custom; all 11 buckets present (price, valuation, growth, profitability, health, cashflow, dividends, technicals, ownership, size, risk); search 'margin' filters metrics; filter-pe-max=20 typed → live count updates to 'Show 159 results'; coming-soon metric _roce shows tag and no min/max inputs (correct). HOWEVER, the results table renders with HUNDREDS of red React Native console errors 'Unexpected text node: $277.65. A text node cannot be a child of a <View>' for every cell — values are visible but appear washed-out / lose tone coloring (positive % no longer green, negative % no longer red). Root cause: SortableDataTable.tsx:181-194 places c.render() output directly inside <View>, while screener.tsx columns return a plain string via fmtMetric(). Also, body rows have NO testID so 'row tap → /stock/[symbol]' could not be programmatically asserted, though TouchableOpacity wires onPress→handlePressRow.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/stocks/AAPL/history?period=1mo", "issue": "Returns points=[] (empty) — yfinance history call appears blocked / rate-limited. Pre-existing, NOT introduced by the screener rewrite."},
+      {"endpoint": "GET /api/stocks/batch/quotes?symbols=AAPL,MSFT", "issue": "Returns price=null for every quote — pre-existing yfinance fast-info issue, NOT related to screener rewrite."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "SortableDataTable / screener results", "issue": "Every cell renders a raw string inside <View>, triggering React Native 'Unexpected text node' errors and stripping styles (tone color, font, alignment). Cells look washed-out grey on web; on native this would CRASH on strict mode. Fix in /app/frontend/src/components/widgets/SortableDataTable.tsx:182 — wrap `c.render(r)` output in a <Text> when typeof === 'string' (or always render via the Text branch and let columns return strings). Alternative: change screener.tsx columns to return <Text> JSX instead of a string.", "testID": "screener-table", "priority": "HIGH"},
+      {"component": "SortableDataTable body rows", "issue": "Result rows are TouchableOpacity but have no testID — could not assert preset-applied row tap navigation. Add `testID={`screener-row-${r[stickyField]}`}` to both the sticky and scrollable row TouchableOpacities for testability.", "testID": "screener-row-<symbol>", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Screener results table", "issues": ["Numeric cells render in muted grey instead of theme.colors.text and lose pos/neg tone coloring because of the text-node-in-View bug above. Visible in /tmp/screener_preset_applied.png — values barely readable on dark bg."]}
+    ],
+    "react_native_issues": [
+      {"component": "SortableDataTable.tsx", "issue": "Strings rendered directly as children of <View> (must be wrapped in <Text>). Reference: /app/frontend/src/components/widgets/SortableDataTable.tsx:181-194. Throws hundreds of console.error per applied filter; web tolerates it but native (Hermes/strict) will warn or fail."},
+      {"component": "props.pointerEvents deprecation", "issue": "Console warning at boot: 'props.pointerEvents is deprecated. Use style.pointerEvents'. Pre-existing, low priority."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_radar_screener.py",
+    "/app/backend/tests/conftest.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "HIGH — Fix the 'Unexpected text node' error flood in the results table. In /app/frontend/src/components/widgets/SortableDataTable.tsx around line 182, when c.render is provided wrap its output in <Text> if it is a string (e.g. `typeof out === 'string' ? <Text style={...}>{out}</Text> : out`). This will also restore positive/negative tone coloring on percent columns.",
+    "MEDIUM — Add `testID={`screener-row-${r[stickyField]}`}` to the row TouchableOpacity (both sticky col and scrollable body) in SortableDataTable.tsx so row-tap → stock detail can be unit-tested.",
+    "LOW (carry-over) — Investigate (tabs)/_layout.tsx Expo Router 'extraneous route' warning for screener/watchlist children.",
+    "LOW (carry-over, NOT screener-related) — /api/stocks/<sym>/history and /api/stocks/batch/quotes are returning empty/null. Likely yfinance rate-limit; consider retry/backoff."
+  ],
+  "critical_code_review_comments": [
+    "SortableDataTable expects render() to return a React node but screener.tsx column defs return plain strings — type signature `render?: (row) => React.ReactNode` is technically satisfied (string is ReactNode in React) but React Native disallows raw strings inside View. Type signature should be tightened or the table must auto-wrap.",
+    "engine.ts inputMul() uses string match `(m.hint || '').includes('billion')` to decide that 'big' metrics are entered in billions — fragile, breaks if a hint is reworded. Prefer an explicit `inputScale` field on Metric.",
+    "FilterSheet placeholder says 'Search 90+ metrics…' but AVAILABLE_COUNT is ~57 and total ~96; the copy mismatches the header chip '57+ metrics' shown on the screener. Pick one number."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_radar_screener.py (added TestScreenerUniverse class with 3 tests validating all 19 new fields on US & IN)"
+  ],
+  "success_rate": {"backend": "89% (17/19; 2 pre-existing yfinance failures unrelated to screener)", "frontend": "85% (results table renders but with severe RN console-error flood + lost cell styling)"},
+  "seed_data_creation": "None — no auth/DB writes.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Public URL is EXPO_PUBLIC_BACKEND_URL from /app/frontend/.env. The redesigned screener lives at /app/frontend/app/(tabs)/screener.tsx. Important testIDs: screener-screen, market-US, market-IN, mode-quick, mode-custom, open-filters, edit-filters, clear-filters, preset-{id} (quality,value,growth,dividend,oversold,megacap,profit,breakout,garp,cashrich), active-filter-{key}, screener-table, filter-search, filter-close, filter-clear, filter-apply, bucket-{id} (price,valuation,growth,profitability,health,cashflow,dividends,technicals,ownership,size,risk), filter-{metric}-min/max, filter-field-{metric} (used for both available + coming-soon rows). Live match count visible in apply button text 'Show N results'. Row testIDs DO NOT exist yet on screener-table rows — flag if main agent forgets to add them when fixing the SortableDataTable bug. Universe endpoint returns ~488 US / ~508 IN stocks each with the 19 new fields verified.",
+  "rca_of_issue": "Results table text-node bug: screener.tsx defines columns with `render: (r) => fmtMetric(...)` which returns a string. SortableDataTable.tsx then does `{c.render(r)}` inside `<View>` (no <Text> wrap). React Native rule: text must live inside a <Text>. Web reports 'Unexpected text node' for every cell; styling props (color/font/textAlign) don't apply to bare strings so cells look washed out & tone coloring is lost. Repro: open Screener → tap any preset card → check browser console (hundreds of errors). Mitigation: wrap string render output in <Text> with the existing tone/align styles applied; alternative: change screener.tsx columns to return <Text> JSX directly."
+}

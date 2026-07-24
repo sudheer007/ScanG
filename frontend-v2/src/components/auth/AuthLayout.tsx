@@ -32,7 +32,7 @@ export default function AuthLayout({ title, subtitle, children }: Props) {
         >
           <View style={styles.logoWrap}>
             <Image
-              source={require('@/assets/images/logo.webp')}
+              source={require('@/assets/images/logo.png')}
               style={styles.logo}
               resizeMode="contain"
               accessibilityLabel="App logo"

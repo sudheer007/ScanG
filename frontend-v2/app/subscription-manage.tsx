@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
-  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,6 +17,7 @@ import { authTheme } from '@/src/auth/authTheme';
 import { useEntitlement } from '@/src/hooks/useEntitlement';
 import { api, type PaymentHistoryItem } from '@/src/api';
 import { downloadReceipt } from '@/src/payments/receipt';
+import AppRefreshControl from '@/src/components/AppRefreshControl';
 
 const ACCENT = authTheme.colors.primary;
 
@@ -118,7 +118,7 @@ export default function SubscriptionManageScreen() {
       <ScrollView
         contentContainerStyle={styles.scroll}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={ACCENT} />
+          <AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={ACCENT} />
         }
         showsVerticalScrollIndicator={false}
       >
