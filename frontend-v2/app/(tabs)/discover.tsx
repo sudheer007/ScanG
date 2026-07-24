@@ -139,21 +139,21 @@ export default function DiscoverScreen() {
         </TouchableOpacity>
       </View>
 
-      <ChipRow
-        testID="market-toggle"
-        options={[
-          { value: 'US', label: '🇺🇸 United States', testID: 'market-US' },
-          { value: 'IN', label: '🇮🇳 India', testID: 'market-IN' },
-        ]}
-        value={market}
-        onChange={(v) => selectMarket(v as Market)}
-      />
-
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={{ paddingBottom: 140, paddingTop: 8 }}
         refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
+        <ChipRow
+          testID="market-toggle"
+          options={[
+            { value: 'US', label: '🇺🇸 United States', testID: 'market-US' },
+            { value: 'IN', label: '🇮🇳 India', testID: 'market-IN' },
+          ]}
+          value={market}
+          onChange={(v) => selectMarket(v as Market)}
+        />
+
         {loading ? (
           <LoadingState label="Building your Discover feed…" />
         ) : error ? (

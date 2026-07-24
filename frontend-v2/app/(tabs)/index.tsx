@@ -254,34 +254,34 @@ export default function MarketsScreen() {
         </TouchableOpacity>
       </View>
 
-      <ChipRow
-        testID="market-toggle"
-        options={[
-          { value: 'US', label: '🇺🇸 United States', testID: 'market-US' },
-          { value: 'IN', label: '🇮🇳 India', testID: 'market-IN' },
-        ]}
-        value={market}
-        onChange={(v) => selectMarket(v as Market)}
-      />
-
-      <SegmentedTabs
-        testID="markets-tabs"
-        options={[
-          { value: 'overview', label: 'Overview' },
-          { value: 'movers', label: 'Movers' },
-          { value: 'sectors', label: 'Sectors' },
-          { value: 'news', label: 'News' },
-          { value: 'calendar', label: 'Calendar' },
-        ]}
-        value={tab}
-        onChange={(v) => setTab(v as Tab)}
-      />
-
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={{ paddingBottom: 130, paddingTop: 4 }}
         refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
+        <ChipRow
+          testID="market-toggle"
+          options={[
+            { value: 'US', label: '🇺🇸 United States', testID: 'market-US' },
+            { value: 'IN', label: '🇮🇳 India', testID: 'market-IN' },
+          ]}
+          value={market}
+          onChange={(v) => selectMarket(v as Market)}
+        />
+
+        <SegmentedTabs
+          testID="markets-tabs"
+          options={[
+            { value: 'overview', label: 'Overview' },
+            { value: 'movers', label: 'Movers' },
+            { value: 'sectors', label: 'Sectors' },
+            { value: 'news', label: 'News' },
+            { value: 'calendar', label: 'Calendar' },
+          ]}
+          value={tab}
+          onChange={(v) => setTab(v as Tab)}
+        />
+
         {loading && !hasData ? (
           <LoadingState label="Fetching live market data…" />
         ) : error && !hasData ? (

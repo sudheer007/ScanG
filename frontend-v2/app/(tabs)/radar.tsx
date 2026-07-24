@@ -260,28 +260,28 @@ export default function RadarScreen() {
         )}
       </View>
 
-      <ChipRow
-        testID="market-toggle"
-        options={[
-          { value: 'US', label: '🇺🇸 US', testID: 'market-US' },
-          { value: 'IN', label: '🇮🇳 India', testID: 'market-IN' },
-        ]}
-        value={market}
-        onChange={(v) => {
-          const next = v as Market;
-          setMarket(next);
-          void marketPref.set(next);
-          setResult(null);
-          if (active) runStrategy(active, next);
-        }}
-      />
-
       {!active ? (
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={{ paddingBottom: 120 }}
           refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
+          <ChipRow
+            testID="market-toggle"
+            options={[
+              { value: 'US', label: '🇺🇸 US', testID: 'market-US' },
+              { value: 'IN', label: '🇮🇳 India', testID: 'market-IN' },
+            ]}
+            value={market}
+            onChange={(v) => {
+              const next = v as Market;
+              setMarket(next);
+              void marketPref.set(next);
+              setResult(null);
+              if (active) runStrategy(active, next);
+            }}
+          />
+
           {loading ? (
             <LoadingState label="Loading strategies…" />
           ) : error ? (
@@ -328,6 +328,21 @@ export default function RadarScreen() {
         <EmptyState title="No matches" subtitle="Try the other market or a different strategy." />
       ) : (
         <View style={{ flex: 1 }}>
+          <ChipRow
+            testID="market-toggle"
+            options={[
+              { value: 'US', label: '🇺🇸 US', testID: 'market-US' },
+              { value: 'IN', label: '🇮🇳 India', testID: 'market-IN' },
+            ]}
+            value={market}
+            onChange={(v) => {
+              const next = v as Market;
+              setMarket(next);
+              void marketPref.set(next);
+              setResult(null);
+              if (active) runStrategy(active, next);
+            }}
+          />
           <Text style={styles.strategyDescription}>{result.subtitle}</Text>
           <ScrollView
             style={{ flex: 1 }}

@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
-  PanResponder,
   Animated,
   ActivityIndicator,
   StyleSheet,
@@ -26,34 +25,57 @@ type Props = {
   titleColor?: string;
 };
 
-const PULL_THRESHOLD = 56;
+const PULL_THRESHOLD = 64;
 const INDICATOR_H = 44;
+const ARM_DY = 10;
 
-/** Find the overflow-scrolling DOM node under the RefreshControl wrapper. */
-function readScrollTop(container: View | null): number {
+function isVerticallyScrollable(el: HTMLElement): boolean {
+  const style = window.getComputedStyle(el);
+  const oy = style.overflowY;
+  if (oy !== 'auto' && oy !== 'scroll' && oy !== 'overlay') return false;
+  // Skip mostly-horizontal scrollers (chip rows, tables).
+  const ox = style.overflowX;
+  if ((ox === 'auto' || ox === 'scroll' || ox === 'overlay') && el.scrollWidth > el.clientWidth + 1) {
+    if (el.scrollHeight <= el.clientHeight + 1) return false;
+  }
+  return true;
+}
+
+/** Largest vertical overflow scroller under the RefreshControl wrapper. */
+function findScrollElement(container: View | null): HTMLElement | null {
   const root = container as unknown as HTMLElement | null;
-  if (!root || typeof document === 'undefined') return 0;
+  if (!root || typeof document === 'undefined') return null;
 
-  const walk = (el: Element | null): number | null => {
-    if (!el || !(el instanceof HTMLElement)) return null;
-    const style = window.getComputedStyle(el);
-    const oy = style.overflowY;
-    if (oy === 'auto' || oy === 'scroll' || oy === 'overlay') {
-      return el.scrollTop;
+  let best: HTMLElement | null = null;
+  let bestArea = -1;
+
+  const walk = (el: Element) => {
+    if (!(el instanceof HTMLElement)) return;
+    if (isVerticallyScrollable(el)) {
+      const area = el.clientWidth * el.clientHeight;
+      if (area > bestArea) {
+        bestArea = area;
+        best = el;
+      }
     }
-    for (let i = 0; i < el.children.length; i += 1) {
-      const found = walk(el.children[i]);
-      if (found !== null) return found;
-    }
-    return null;
+    for (let i = 0; i < el.children.length; i += 1) walk(el.children[i]);
   };
 
-  return walk(root) ?? 0;
+  walk(root);
+  return best;
+}
+
+function readScrollTop(scrollEl: HTMLElement | null): number {
+  if (!scrollEl) return Number.POSITIVE_INFINITY;
+  return Math.max(scrollEl.scrollTop, 0);
 }
 
 /**
  * Web pull-to-refresh — RN Web's RefreshControl is a no-op stub.
  * ScrollView clones this around itself; we own the overscroll gesture.
+ *
+ * Uses native touch listeners on the scroll node (not PanResponder) so
+ * normal mid-page scrolling never arms refresh — only pull-down at scrollTop 0.
  */
 export default function AppRefreshControl({
   refreshing,
@@ -69,8 +91,15 @@ export default function AppRefreshControl({
 }: Props) {
   const onRefreshRef = useRef(onRefresh);
   const enabledRef = useRef(enabled);
+  const refreshingRef = useRef(refreshing);
   const containerRef = useRef<View>(null);
-  const pullReached = useRef(0);
+  const scrollElRef = useRef<HTMLElement | null>(null);
+  const pullReached = useRef(false);
+
+  const startYRef = useRef(0);
+  const startScrollTopRef = useRef(0);
+  const pullingRef = useRef(false);
+  const pullDyRef = useRef(0);
 
   const pullAnim = useRef(new Animated.Value(0)).current;
   const arrowAnim = useRef(new Animated.Value(0)).current;
@@ -81,66 +110,169 @@ export default function AppRefreshControl({
   useEffect(() => {
     enabledRef.current = enabled;
   }, [enabled]);
+  useEffect(() => {
+    refreshingRef.current = refreshing;
+  }, [refreshing]);
 
   useEffect(() => {
     Animated.timing(pullAnim, {
       toValue: refreshing ? INDICATOR_H : 0,
-      duration: 280,
+      duration: 220,
       useNativeDriver: false,
     }).start();
     if (refreshing) {
-      pullReached.current = 0;
+      pullReached.current = false;
+      pullingRef.current = false;
+      pullDyRef.current = 0;
       arrowAnim.setValue(0);
     }
   }, [refreshing, pullAnim, arrowAnim]);
 
-  const finishGesture = useCallback(() => {
-    if (pullReached.current && onRefreshRef.current) {
-      onRefreshRef.current();
-      return;
-    }
+  const setPullVisual = useCallback(
+    (dy: number) => {
+      const damped = dy <= 0 ? 0 : (dy * 140) / (dy + 110);
+      pullDyRef.current = damped;
+      pullAnim.setValue(damped);
+      const next = damped > PULL_THRESHOLD;
+      if (next !== pullReached.current) {
+        pullReached.current = next;
+        Animated.timing(arrowAnim, {
+          toValue: next ? 1 : 0,
+          duration: 120,
+          useNativeDriver: false,
+        }).start();
+      }
+    },
+    [arrowAnim, pullAnim],
+  );
+
+  const resetPullVisual = useCallback(() => {
+    pullingRef.current = false;
+    pullReached.current = false;
+    pullDyRef.current = 0;
     Animated.timing(pullAnim, {
-      toValue: 0,
-      duration: 280,
+      toValue: refreshingRef.current ? INDICATOR_H : 0,
+      duration: 220,
       useNativeDriver: false,
     }).start();
-  }, [pullAnim]);
+    arrowAnim.setValue(0);
+  }, [arrowAnim, pullAnim]);
 
-  const panResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => false,
-        onStartShouldSetPanResponderCapture: () => false,
-        onMoveShouldSetPanResponder: (_, g) => {
-          if (enabledRef.current === false || refreshing) return false;
-          if (readScrollTop(containerRef.current) > 1) return false;
-          return (
-            Math.abs(g.dy) > Math.abs(g.dx) * 2 &&
-            Math.abs(g.vy) > Math.abs(g.vx) * 2 &&
-            g.dy > 4
-          );
-        },
-        onMoveShouldSetPanResponderCapture: () => false,
-        onPanResponderMove: (_, g) => {
-          if (enabledRef.current === false) return;
-          const dy = g.dy <= 0 ? 0 : (g.dy * 140) / (g.dy + 110);
-          pullAnim.setValue(dy);
-          const next = dy > PULL_THRESHOLD ? 1 : 0;
-          if (next !== pullReached.current) {
-            pullReached.current = next;
-            Animated.timing(arrowAnim, {
-              toValue: next,
-              duration: 140,
-              useNativeDriver: false,
-            }).start();
-          }
-        },
-        onPanResponderTerminationRequest: () => true,
-        onPanResponderRelease: finishGesture,
-        onPanResponderTerminate: finishGesture,
-      }),
-    [arrowAnim, finishGesture, pullAnim, refreshing],
-  );
+  const finishGesture = useCallback(() => {
+    if (!pullingRef.current) {
+      resetPullVisual();
+      return;
+    }
+    const shouldRefresh = pullReached.current && !!onRefreshRef.current;
+    pullingRef.current = false;
+    if (shouldRefresh) {
+      pullReached.current = false;
+      onRefreshRef.current?.();
+      return;
+    }
+    resetPullVisual();
+  }, [resetPullVisual]);
+
+  // Bind touch listeners directly to the vertical scroller.
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+
+    let cancelled = false;
+    let scrollEl: HTMLElement | null = null;
+    let bound = false;
+    let raf = 0;
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (!enabledRef.current || refreshingRef.current) return;
+      if (e.touches.length !== 1) return;
+      startYRef.current = e.touches[0].clientY;
+      startScrollTopRef.current = readScrollTop(scrollElRef.current);
+      pullingRef.current = false;
+      pullReached.current = false;
+      pullDyRef.current = 0;
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (!enabledRef.current || refreshingRef.current) return;
+      if (e.touches.length !== 1) return;
+      const el = scrollElRef.current;
+      if (!el) return;
+
+      const y = e.touches[0].clientY;
+      const dy = y - startYRef.current;
+      const scrollTop = readScrollTop(el);
+
+      // Must begin at top; leave pull mode if the list scrolls away from top.
+      if (startScrollTopRef.current > 1 || scrollTop > 1) {
+        if (pullingRef.current) resetPullVisual();
+        return;
+      }
+
+      // Finger moving up → normal scroll, never refresh.
+      if (dy <= ARM_DY) {
+        if (pullingRef.current) resetPullVisual();
+        return;
+      }
+
+      // At top + pulling down → own the gesture so the page doesn't rubber-band.
+      pullingRef.current = true;
+      if (e.cancelable) e.preventDefault();
+      setPullVisual(dy);
+    };
+
+    const onTouchEnd = () => {
+      if (pullingRef.current || pullDyRef.current > 0) finishGesture();
+    };
+
+    const bind = (el: HTMLElement) => {
+      if (bound && scrollEl === el) return;
+      if (scrollEl && bound) {
+        scrollEl.removeEventListener('touchstart', onTouchStart);
+        scrollEl.removeEventListener('touchmove', onTouchMove);
+        scrollEl.removeEventListener('touchend', onTouchEnd);
+        scrollEl.removeEventListener('touchcancel', onTouchEnd);
+      }
+      scrollEl = el;
+      scrollElRef.current = el;
+      // Stop browser native PTR from fighting our gesture on mobile Chrome.
+      el.style.overscrollBehaviorY = 'contain';
+      el.addEventListener('touchstart', onTouchStart, { passive: true });
+      el.addEventListener('touchmove', onTouchMove, { passive: false });
+      el.addEventListener('touchend', onTouchEnd);
+      el.addEventListener('touchcancel', onTouchEnd);
+      bound = true;
+    };
+
+    const unbind = () => {
+      if (!scrollEl || !bound) return;
+      scrollEl.removeEventListener('touchstart', onTouchStart);
+      scrollEl.removeEventListener('touchmove', onTouchMove);
+      scrollEl.removeEventListener('touchend', onTouchEnd);
+      scrollEl.removeEventListener('touchcancel', onTouchEnd);
+      bound = false;
+      scrollEl = null;
+      scrollElRef.current = null;
+    };
+
+    const tryAttach = () => {
+      if (cancelled) return;
+      const found = findScrollElement(containerRef.current);
+      if (found) {
+        bind(found);
+        return;
+      }
+      // ScrollView may mount a frame later after cloneElement.
+      raf = window.requestAnimationFrame(tryAttach);
+    };
+
+    tryAttach();
+
+    return () => {
+      cancelled = true;
+      if (raf) window.cancelAnimationFrame(raf);
+      unbind();
+    };
+  }, [finishGesture, resetPullVisual, setPullVisual]);
 
   const color = tintColor || colors?.[0] || theme.colors.text;
 
@@ -174,7 +306,7 @@ export default function AppRefreshControl({
   });
 
   return (
-    <View ref={containerRef} style={outerStyle} {...panResponder.panHandlers}>
+    <View ref={containerRef} style={outerStyle}>
       <Animated.View style={indicatorStyle} pointerEvents="none">
         {refreshing ? (
           <View style={styles.row}>

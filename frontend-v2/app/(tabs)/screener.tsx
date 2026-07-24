@@ -222,50 +222,58 @@ export default function ScreenerScreen() {
         </TouchableOpacity>
       </View>
 
-      <ChipRow
-        testID="market-toggle"
-        options={[
-          { value: 'US', label: '🇺🇸 US', testID: 'market-US' },
-          { value: 'IN', label: '🇮🇳 India', testID: 'market-IN' },
-        ]}
-        value={market}
-        onChange={(v) => { setMarket(v as Market); marketPref.set(v as Market); }}
-      />
-
-      {/* Mode segmented control — hide on custom results to match Radar detail focus */}
-      {mode === 'quick' && (
-        <View style={styles.segment}>
-          <SegBtn icon="flash" label="Quick Screens" active={mode === 'quick'} onPress={() => onModeChange('quick')} testID="mode-quick" />
-          <SegBtn icon="construct" label="Custom" active={mode === 'custom'} onPress={() => onModeChange('custom')} testID="mode-custom" />
-        </View>
-      )}
-
       {loading ? (
         <LoadingState label="Loading universe…" />
       ) : error ? (
         <ErrorState message={error} onRetry={load} />
       ) : mode === 'quick' ? (
         <ScrollView
-          contentContainerStyle={styles.grid}
+          contentContainerStyle={{ paddingBottom: 120 }}
           refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
-          <Text style={styles.gridHint}>Tap a screen to instantly load expert filters — then tweak any value.</Text>
-          {PRESETS.map((p) => (
-            <TouchableOpacity key={p.id} testID={`preset-${p.id}`} style={[styles.card, activePreset === p.id && styles.cardActive]} activeOpacity={0.85} onPress={() => applyPreset(p)}>
-              <View style={[styles.cardIcon, { backgroundColor: p.color + '22' }]}>
-                <Ionicons name={p.icon as any} size={20} color={p.color} />
-              </View>
-              <Text style={styles.cardTitle} numberOfLines={2}>{p.name}</Text>
-              <Text style={styles.cardBlurb} numberOfLines={2}>{p.blurb}</Text>
-              <View style={styles.cardFooter}>
-                <Text style={[styles.cardCount, { color: p.color }]}>{applyFilters(universe, p.filters).length} matches</Text>
-                <Ionicons name="arrow-forward" size={13} color={theme.colors.textMuted} />
-              </View>
-            </TouchableOpacity>
-          ))}
+          <ChipRow
+            testID="market-toggle"
+            options={[
+              { value: 'US', label: '🇺🇸 US', testID: 'market-US' },
+              { value: 'IN', label: '🇮🇳 India', testID: 'market-IN' },
+            ]}
+            value={market}
+            onChange={(v) => { setMarket(v as Market); marketPref.set(v as Market); }}
+          />
+
+          <View style={styles.segment}>
+            <SegBtn icon="flash" label="Quick Screens" active={mode === 'quick'} onPress={() => onModeChange('quick')} testID="mode-quick" />
+            <SegBtn icon="construct" label="Custom" active={mode === 'custom'} onPress={() => onModeChange('custom')} testID="mode-custom" />
+          </View>
+
+          <View style={styles.grid}>
+            <Text style={styles.gridHint}>Tap a screen to instantly load expert filters — then tweak any value.</Text>
+            {PRESETS.map((p) => (
+              <TouchableOpacity key={p.id} testID={`preset-${p.id}`} style={[styles.card, activePreset === p.id && styles.cardActive]} activeOpacity={0.85} onPress={() => applyPreset(p)}>
+                <View style={[styles.cardIcon, { backgroundColor: p.color + '22' }]}>
+                  <Ionicons name={p.icon as any} size={20} color={p.color} />
+                </View>
+                <Text style={styles.cardTitle} numberOfLines={2}>{p.name}</Text>
+                <Text style={styles.cardBlurb} numberOfLines={2}>{p.blurb}</Text>
+                <View style={styles.cardFooter}>
+                  <Text style={[styles.cardCount, { color: p.color }]}>{applyFilters(universe, p.filters).length} matches</Text>
+                  <Ionicons name="arrow-forward" size={13} color={theme.colors.textMuted} />
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
         </ScrollView>
       ) : (
         <View style={{ flex: 1 }}>
+          <ChipRow
+            testID="market-toggle"
+            options={[
+              { value: 'US', label: '🇺🇸 US', testID: 'market-US' },
+              { value: 'IN', label: '🇮🇳 India', testID: 'market-IN' },
+            ]}
+            value={market}
+            onChange={(v) => { setMarket(v as Market); marketPref.set(v as Market); }}
+          />
           {/* Active summary bar */}
           <View style={styles.summaryBar}>
             <View style={{ flex: 1 }}>
