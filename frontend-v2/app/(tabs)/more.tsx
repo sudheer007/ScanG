@@ -17,6 +17,7 @@ import { useAuth } from '@/src/hooks/useAuth';
 import { listWatchlist } from '@/src/services/watchlistService';
 import { listPortfolio } from '@/src/services/portfolioService';
 import AppRefreshControl from '@/src/components/AppRefreshControl';
+import AppScrollView from '@/src/components/AppScrollView';
 
 const ACCENT = authTheme.colors.primary; // logo blue #1A82FF
 const ACCENT_DIM = 'rgba(26, 130, 255, 0.14)';
@@ -130,7 +131,7 @@ export default function MoreScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']} testID="more-screen">
-      <ScrollView
+      <AppScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
         refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -179,7 +180,7 @@ export default function MoreScreen() {
             </Pressable>
           ))}
         </View>
-      </ScrollView>
+      </AppScrollView>
     </SafeAreaView>
   );
 }

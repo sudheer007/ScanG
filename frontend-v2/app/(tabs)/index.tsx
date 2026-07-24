@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -10,6 +10,7 @@ import { fmtDayShort, daysUntilLabel } from '@/src/utils/date';
 import { mergeLiveQuotes } from '@/src/utils/mergeLiveQuotes';
 import { marketPref } from '@/src/storage-keys';
 import AppRefreshControl from '@/src/components/AppRefreshControl';
+import AppScrollView from '@/src/components/AppScrollView';
 import ChipRow from '@/src/components/ChipRow';
 import SegmentedTabs from '@/src/components/widgets/SegmentedTabs';
 import StockRow from '@/src/components/StockRow';
@@ -254,7 +255,7 @@ export default function MarketsScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView
+      <AppScrollView
         style={styles.scroll}
         contentContainerStyle={{ paddingBottom: 130, paddingTop: 4 }}
         refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -319,7 +320,7 @@ export default function MarketsScreen() {
             )}
           </>
         )}
-      </ScrollView>
+      </AppScrollView>
 
       <SectorDetailSheet
         open={sectorSheetOpen}
@@ -543,8 +544,28 @@ function SectionHeader({ title, actionLabel, onAction }: { title: string; action
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: theme.colors.bg },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: theme.spacing.lg, paddingTop: theme.spacing.sm, paddingBottom: theme.spacing.sm },
+  safe: {
+    flex: 1,
+    backgroundColor: theme.colors.bg,
+    ...(Platform.OS === 'web'
+      ? ({ minHeight: '100dvh', height: 'auto', flexGrow: 1 } as object)
+      : null),
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing.lg,
+    paddingTop: theme.spacing.sm,
+    paddingBottom: theme.spacing.sm,
+    ...(Platform.OS === 'web'
+      ? ({
+          position: 'sticky',
+          top: 0,
+          zIndex: 20,
+          backgroundColor: theme.colors.bg,
+        } as object)
+      : null),
+  },
   title: { color: theme.colors.text, fontSize: 28, fontWeight: '700', letterSpacing: -0.5 },
   subtitle: { color: theme.colors.textMuted, fontSize: 12, marginTop: 2 },
   iconBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: theme.colors.bg2, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: theme.colors.border },

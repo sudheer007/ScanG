@@ -11,6 +11,7 @@ import { ValueSlider } from '@/src/calculators/ValueSlider';
 import { fmtInrCompact, type CalcResult } from '@/src/calculators/calcMath';
 import { authTheme } from '@/src/auth/authTheme';
 import AppRefreshControl from '@/src/components/AppRefreshControl';
+import AppScrollView from '@/src/components/AppScrollView';
 
 const SIP_BLUE_START = '#061D3E';
 const SIP_BLUE_END = '#040A16';
@@ -81,7 +82,7 @@ export function CalculatorShell({
           <View style={styles.backBtnGhost} />
         </View>
 
-        <ScrollView
+        <AppScrollView
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
@@ -126,7 +127,7 @@ export function CalculatorShell({
               />
             ))}
           </View>
-        </ScrollView>
+        </AppScrollView>
       </LinearGradient>
     </SafeAreaView>
   );

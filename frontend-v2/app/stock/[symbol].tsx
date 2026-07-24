@@ -10,6 +10,7 @@ import { addWatchlistItem, hasWatchlistItem, removeWatchlistItem } from '@/src/s
 import { useAuth } from '@/src/hooks/useAuth';
 import { useFocusInterval } from '@/src/hooks/useFocusInterval';
 import AppRefreshControl from '@/src/components/AppRefreshControl';
+import AppScrollView from '@/src/components/AppScrollView';
 import PriceChart from '@/src/components/PriceChart';
 import EventsWidget from '@/src/components/EventsWidget';
 import NewsList from '@/src/components/NewsList';
@@ -223,7 +224,7 @@ export default function StockDetailScreen() {
         }
       />
 
-      <ScrollView
+      <AppScrollView
         contentContainerStyle={{ paddingBottom: 120 }}
         refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
@@ -308,7 +309,7 @@ export default function StockDetailScreen() {
           <Text style={styles.sectionTitle}>Latest News</Text>
         </View>
         <NewsList news={news} emptyLabel="No recent headlines for this stock." />
-      </ScrollView>
+      </AppScrollView>
     </SafeAreaView>
   );
 }

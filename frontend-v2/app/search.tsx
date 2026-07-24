@@ -7,6 +7,7 @@ import { useRouter } from 'expo-router';
 import { api } from '@/src/api';
 import { theme, fmtPrice, fmtPct, changeColor } from '@/src/theme';
 import AppRefreshControl from '@/src/components/AppRefreshControl';
+import AppScrollView from '@/src/components/AppScrollView';
 
 interface Result { symbol: string; name: string; market: 'US'|'IN'; price: number; change_pct: number; currency: string }
 
@@ -74,7 +75,7 @@ export default function SearchScreen() {
         </View>
       </View>
 
-      <ScrollView
+      <AppScrollView
         contentContainerStyle={{ paddingBottom: 80 }}
         refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} enabled={!!q.trim()} />}
       >
@@ -99,7 +100,7 @@ export default function SearchScreen() {
             </View>
           </TouchableOpacity>
         ))}
-      </ScrollView>
+      </AppScrollView>
     </SafeAreaView>
   );
 }

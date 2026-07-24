@@ -19,6 +19,7 @@ import { authTheme } from '@/src/auth/authTheme';
 import { useAuth } from '@/src/hooks/useAuth';
 import { useEntitlement } from '@/src/hooks/useEntitlement';
 import AppRefreshControl from '@/src/components/AppRefreshControl';
+import AppScrollView from '@/src/components/AppScrollView';
 import {
   api,
   ApiError,
@@ -209,7 +210,7 @@ export default function SubscribeScreen() {
         <View style={styles.iconBtnGhost} />
       </View>
 
-      <ScrollView
+      <AppScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
         refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -283,7 +284,7 @@ export default function SubscribeScreen() {
         <Text style={styles.securedBy}>
           Secured by <Text style={{ color: ACCENT, fontWeight: '700' }}>Razorpay</Text>
         </Text>
-      </ScrollView>
+      </AppScrollView>
 
       <View style={styles.footer}>
         <TouchableOpacity

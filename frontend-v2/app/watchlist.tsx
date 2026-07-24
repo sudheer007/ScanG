@@ -19,6 +19,7 @@ import { WatchItem } from '@/src/storage-keys';
 import { listWatchlist, removeWatchlistItem } from '@/src/services/watchlistService';
 import { useAuth } from '@/src/hooks/useAuth';
 import AppRefreshControl from '@/src/components/AppRefreshControl';
+import AppScrollView from '@/src/components/AppScrollView';
 import StockRow from '@/src/components/StockRow';
 import { LoadingState } from '@/src/components/States';
 
@@ -255,7 +256,7 @@ export default function WatchlistScreen() {
         </View>
       ) : null}
 
-      <ScrollView
+      <AppScrollView
         contentContainerStyle={{ paddingBottom: 40 }}
         refreshControl={
           <AppRefreshControl
@@ -308,7 +309,7 @@ export default function WatchlistScreen() {
             </View>
           ))
         )}
-      </ScrollView>
+      </AppScrollView>
 
       <Modal visible={showInvalid} transparent animationType="fade" onRequestClose={() => setShowInvalid(false)}>
         <View style={styles.modalBackdrop}>

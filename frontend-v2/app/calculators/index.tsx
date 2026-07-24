@@ -15,6 +15,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { theme } from '@/src/theme';
 import { authTheme } from '@/src/auth/authTheme';
 import AppRefreshControl from '@/src/components/AppRefreshControl';
+import AppScrollView from '@/src/components/AppScrollView';
 
 const BLUE = authTheme.colors.primary; // logo blue #1A82FF
 const BLUE_DIM = 'rgba(26, 130, 255, 0.14)';
@@ -86,7 +87,7 @@ export default function CalculatorsScreen() {
         </View>
       </LinearGradient>
 
-      <ScrollView
+      <AppScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
         refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -131,7 +132,7 @@ export default function CalculatorsScreen() {
             </Pressable>
           ))}
         </View>
-      </ScrollView>
+      </AppScrollView>
     </SafeAreaView>
   );
 }

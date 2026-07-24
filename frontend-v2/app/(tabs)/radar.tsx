@@ -8,6 +8,7 @@ import { api, Market, RadarResult, Stock, Strategy } from '@/src/api';
 import { theme } from '@/src/theme';
 import { marketPref } from '@/src/storage-keys';
 import AppRefreshControl from '@/src/components/AppRefreshControl';
+import AppScrollView from '@/src/components/AppScrollView';
 import ChipRow from '@/src/components/ChipRow';
 import Sparkline from '@/src/components/Sparkline';
 import AnalystGauge from '@/src/components/AnalystGauge';
@@ -261,7 +262,7 @@ export default function RadarScreen() {
       </View>
 
       {!active ? (
-        <ScrollView
+        <AppScrollView
           style={styles.scroll}
           contentContainerStyle={{ paddingBottom: 120 }}
           refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -319,7 +320,7 @@ export default function RadarScreen() {
               })}
             </View>
           )}
-        </ScrollView>
+        </AppScrollView>
       ) : loading ? (
         <LoadingState label={`Scanning ${market} universe…`} />
       ) : error ? (
@@ -344,7 +345,7 @@ export default function RadarScreen() {
             }}
           />
           <Text style={styles.strategyDescription}>{result.subtitle}</Text>
-          <ScrollView
+          <AppScrollView
             style={{ flex: 1 }}
             contentContainerStyle={{ paddingBottom: 120, flexGrow: 1 }}
             refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -360,7 +361,7 @@ export default function RadarScreen() {
                 defaultSort={{ key: 'rating', desc: true }}
               />
             </View>
-          </ScrollView>
+          </AppScrollView>
         </View>
       )}
     </SafeAreaView>

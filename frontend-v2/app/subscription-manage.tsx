@@ -18,6 +18,7 @@ import { useEntitlement } from '@/src/hooks/useEntitlement';
 import { api, type PaymentHistoryItem } from '@/src/api';
 import { downloadReceipt } from '@/src/payments/receipt';
 import AppRefreshControl from '@/src/components/AppRefreshControl';
+import AppScrollView from '@/src/components/AppScrollView';
 
 const ACCENT = authTheme.colors.primary;
 
@@ -115,7 +116,7 @@ export default function SubscriptionManageScreen() {
         <View style={styles.iconBtnGhost} />
       </View>
 
-      <ScrollView
+      <AppScrollView
         contentContainerStyle={styles.scroll}
         refreshControl={
           <AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={ACCENT} />
@@ -212,7 +213,7 @@ export default function SubscriptionManageScreen() {
             ))}
           </View>
         )}
-      </ScrollView>
+      </AppScrollView>
     </SafeAreaView>
   );
 }

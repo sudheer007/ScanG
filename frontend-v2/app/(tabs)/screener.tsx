@@ -10,6 +10,7 @@ import { marketPref, screenerSectorPref } from '@/src/storage-keys';
 import { useFocusInterval } from '@/src/hooks/useFocusInterval';
 import { mergeLiveQuotes } from '@/src/utils/mergeLiveQuotes';
 import AppRefreshControl from '@/src/components/AppRefreshControl';
+import AppScrollView from '@/src/components/AppScrollView';
 import ChipRow from '@/src/components/ChipRow';
 import { EmptyState, ErrorState, LoadingState } from '@/src/components/States';
 import FilterSheet from '@/src/components/FilterSheet';
@@ -227,7 +228,7 @@ export default function ScreenerScreen() {
       ) : error ? (
         <ErrorState message={error} onRetry={load} />
       ) : mode === 'quick' ? (
-        <ScrollView
+        <AppScrollView
           contentContainerStyle={{ paddingBottom: 120 }}
           refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
@@ -262,7 +263,7 @@ export default function ScreenerScreen() {
               </TouchableOpacity>
             ))}
           </View>
-        </ScrollView>
+        </AppScrollView>
       ) : (
         <View style={{ flex: 1 }}>
           <ChipRow
@@ -311,7 +312,7 @@ export default function ScreenerScreen() {
           ) : results.length === 0 ? (
             <EmptyState title="No matches" subtitle="Try loosening your filters." />
           ) : (
-            <ScrollView
+            <AppScrollView
               style={{ flex: 1 }}
               contentContainerStyle={{ paddingHorizontal: theme.spacing.sm, paddingBottom: 120 }}
               showsVerticalScrollIndicator
@@ -324,7 +325,7 @@ export default function ScreenerScreen() {
                 stickyField="symbol"
                 stickyWidth={90}
               />
-            </ScrollView>
+            </AppScrollView>
           )}
         </View>
       )}

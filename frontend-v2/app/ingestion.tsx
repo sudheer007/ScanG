@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { api, Market } from '@/src/api';
 import { theme } from '@/src/theme';
 import AppRefreshControl from '@/src/components/AppRefreshControl';
+import AppScrollView from '@/src/components/AppScrollView';
 import ScreenHeader from '@/src/components/ScreenHeader';
 import { ErrorState, LoadingState } from '@/src/components/States';
 import type { IngestionRun, IngestionStatus } from '@/src/types/ingestion';
@@ -99,7 +100,7 @@ export default function IngestionScreen() {
 
       {error ? <ErrorState message={error} onRetry={() => load(true)} /> : null}
 
-      <ScrollView
+      <AppScrollView
         contentContainerStyle={styles.content}
         refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(true); }} tintColor={theme.colors.textMuted} />}
       >
@@ -229,7 +230,7 @@ export default function IngestionScreen() {
         ) : (
           (status?.recent_runs || []).map((run) => <RunRow key={run.run_id} run={run} />)
         )}
-      </ScrollView>
+      </AppScrollView>
     </SafeAreaView>
   );
 }

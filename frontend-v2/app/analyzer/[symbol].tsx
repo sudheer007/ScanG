@@ -8,6 +8,7 @@ import { api } from '@/src/api';
 import type { AnalyzerResult, AnalyzerPeer } from '@/src/types/analyzer';
 import { theme, fmtPrice, fmtPct, fmtMarketCap, changeColor, fmtNum } from '@/src/theme';
 import AppRefreshControl from '@/src/components/AppRefreshControl';
+import AppScrollView from '@/src/components/AppScrollView';
 import { LoadingState, ErrorState } from '@/src/components/States';
 import ScoreBar from '@/src/components/widgets/ScoreBar';
 import RatingBar from '@/src/components/widgets/RatingBar';
@@ -75,7 +76,7 @@ export default function AnalyzerScreen() {
         title="AI Analyzer"
         subtitle={`${sym.replace('.NS', '')} · ${data.name || ''}`}
       />
-      <ScrollView
+      <AppScrollView
         contentContainerStyle={{ paddingBottom: 120 }}
         refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }} />}
       >
@@ -448,7 +449,7 @@ export default function AnalyzerScreen() {
           Disclaimer: All analysis is for informational purposes. Real analyst data sourced from Yahoo Finance. AI scores
           and short-horizon forecasts are model-derived and not investment advice.
         </Text>
-      </ScrollView>
+      </AppScrollView>
     </SafeAreaView>
   );
 }

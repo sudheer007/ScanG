@@ -8,6 +8,7 @@ import { api, Market } from '@/src/api';
 import { theme, fmtPct, fmtPrice, fmtMarketCap, changeColor } from '@/src/theme';
 import { marketPref } from '@/src/storage-keys';
 import AppRefreshControl from '@/src/components/AppRefreshControl';
+import AppScrollView from '@/src/components/AppScrollView';
 import { LoadingState, ErrorState, EmptyState } from '@/src/components/States';
 import SegmentedTabs from '@/src/components/widgets/SegmentedTabs';
 import DataTable, { Column } from '@/src/components/widgets/DataTable'; // eslint-disable-line @typescript-eslint/no-unused-vars
@@ -185,7 +186,7 @@ export default function DiscoverDetail() {
         onChange={(v) => selectMarket(v as Market)}
       />
 
-      <ScrollView
+      <AppScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingBottom: 140 }}
         refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -197,7 +198,7 @@ export default function DiscoverDetail() {
         ) : (
           <DetailBody id={id} data={data} tab={tab} setTab={setTab} />
         )}
-      </ScrollView>
+      </AppScrollView>
     </SafeAreaView>
   );
 }

@@ -1,5 +1,5 @@
-import React from 'react';
-import { Redirect, Tabs, type Href } from 'expo-router';
+import React, { useEffect } from 'react';
+import { Redirect, Tabs, usePathname, type Href } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '@/src/theme';
 import { Platform, View, ActivityIndicator } from 'react-native';
@@ -13,6 +13,13 @@ function TabIcon({ name, color }: { name: keyof typeof Ionicons.glyphMap; color:
 
 export default function TabsLayout() {
   const { user, loading, needsOnboarding } = useAuth();
+  const pathname = usePathname();
+
+  // Document scroll persists across tabs — jump back to top on tab change (web).
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    window.scrollTo(0, 0);
+  }, [pathname]);
 
   if (loading) {
     return (
@@ -37,13 +44,18 @@ export default function TabsLayout() {
         tabBarActiveTintColor: theme.colors.text,
         tabBarInactiveTintColor: theme.colors.textSubtle,
         tabBarStyle: {
-          position: 'absolute',
+          position: Platform.OS === 'web' ? 'fixed' : 'absolute',
+          left: 0,
+          right: 0,
+          bottom: 0,
           backgroundColor: Platform.OS === 'ios' ? 'transparent' : 'rgba(10,10,12,0.96)',
           borderTopColor: theme.colors.border,
           borderTopWidth: 0.5,
           height: 64 + (Platform.OS === 'ios' ? 24 : 8),
           paddingTop: 8,
           paddingBottom: Platform.OS === 'ios' ? 24 : 10,
+          // @ts-expect-error web-only CSS
+          zIndex: Platform.OS === 'web' ? 100 : undefined,
         },
         tabBarBackground: () =>
           Platform.OS === 'ios' ? (

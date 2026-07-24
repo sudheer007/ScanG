@@ -13,6 +13,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 
 import { api, type NiftyDirection, type NiftyPredictResponse, type NiftySignals } from '@/src/api';
 import AppRefreshControl from '@/src/components/AppRefreshControl';
+import AppScrollView from '@/src/components/AppScrollView';
 import ChipRow from '@/src/components/ChipRow';
 import Sparkline from '@/src/components/Sparkline';
 import ScoreBar from '@/src/components/widgets/ScoreBar';
@@ -206,7 +207,7 @@ export default function NiftyPulseScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['top']} testID="nifty-pulse-screen">
       <Header onBack={() => router.back()} />
-      <ScrollView
+      <AppScrollView
         contentContainerStyle={styles.scroll}
         refreshControl={
           <AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />
@@ -290,7 +291,7 @@ export default function NiftyPulseScreen() {
         {data?.disclaimer ? (
           <Text style={styles.disclaimer}>{data.disclaimer}</Text>
         ) : null}
-      </ScrollView>
+      </AppScrollView>
     </SafeAreaView>
   );
 }

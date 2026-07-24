@@ -18,6 +18,7 @@ import * as Haptics from 'expo-haptics';
 
 import { api, ApiError, Stock } from '@/src/api';
 import AppRefreshControl from '@/src/components/AppRefreshControl';
+import AppScrollView from '@/src/components/AppScrollView';
 import { theme, changeColor } from '@/src/theme';
 import { authTheme } from '@/src/auth/authTheme';
 import { PortfolioItem } from '@/src/storage-keys';
@@ -388,7 +389,7 @@ export default function PortfolioScreen() {
         </View>
       ) : null}
 
-      <ScrollView
+      <AppScrollView
         contentContainerStyle={{ paddingBottom: 48 }}
         refreshControl={
           <AppRefreshControl
@@ -510,7 +511,7 @@ export default function PortfolioScreen() {
             })}
           </>
         )}
-      </ScrollView>
+      </AppScrollView>
 
       <Modal visible={showInvalid} transparent animationType="fade" onRequestClose={() => setShowInvalid(false)}>
         <View style={styles.modalBackdrop}>

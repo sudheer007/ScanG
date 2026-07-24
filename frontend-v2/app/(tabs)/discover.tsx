@@ -8,6 +8,7 @@ import { api, Market } from '@/src/api';
 import { theme, fmtPct, changeColor } from '@/src/theme';
 import { marketPref } from '@/src/storage-keys';
 import AppRefreshControl from '@/src/components/AppRefreshControl';
+import AppScrollView from '@/src/components/AppScrollView';
 import ChipRow from '@/src/components/ChipRow';
 import { LoadingState, ErrorState } from '@/src/components/States';
 import WidgetCard from '@/src/components/widgets/WidgetCard';
@@ -139,7 +140,7 @@ export default function DiscoverScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView
+      <AppScrollView
         style={styles.scroll}
         contentContainerStyle={{ paddingBottom: 140, paddingTop: 8 }}
         refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -499,7 +500,7 @@ export default function DiscoverScreen() {
             </WidgetCard>
           </>
         )}
-      </ScrollView>
+      </AppScrollView>
     </SafeAreaView>
   );
 }

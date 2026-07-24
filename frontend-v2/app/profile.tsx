@@ -25,6 +25,7 @@ import { authTheme } from '@/src/auth/authTheme';
 import { useAuth } from '@/src/hooks/useAuth';
 import { useEntitlement } from '@/src/hooks/useEntitlement';
 import AppRefreshControl from '@/src/components/AppRefreshControl';
+import AppScrollView from '@/src/components/AppScrollView';
 import { LOGOUT } from '@/constants/testIds/auth';
 
 const ACCENT = authTheme.colors.primary; // logo blue #1A82FF
@@ -332,7 +333,7 @@ export default function ProfileScreen() {
         <View style={styles.iconBtnGhost} />
       </View>
 
-      <ScrollView
+      <AppScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
         refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -398,7 +399,7 @@ export default function ProfileScreen() {
           <Ionicons name="log-out-outline" size={18} color="#FCA5A5" />
           <Text style={styles.logoutText}>Sign out</Text>
         </TouchableOpacity>
-      </ScrollView>
+      </AppScrollView>
 
       <Modal visible={showShare} transparent animationType="fade" onRequestClose={closeShare}>
         <View style={styles.shareBackdrop}>

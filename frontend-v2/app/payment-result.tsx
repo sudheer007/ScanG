@@ -16,6 +16,7 @@ import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { theme } from '@/src/theme';
 import { downloadReceipt } from '@/src/payments/receipt';
 import AppRefreshControl from '@/src/components/AppRefreshControl';
+import AppScrollView from '@/src/components/AppScrollView';
 
 const ACCENT = '#7CD3FF';
 const ACCENT_DARK = '#1A82FF';
@@ -117,7 +118,7 @@ export default function PaymentResultScreen() {
         </View>
       </View>
 
-      <ScrollView
+      <AppScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
         refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -222,7 +223,7 @@ export default function PaymentResultScreen() {
             <Text style={styles.pciText}>PCI-DSS Secure Payment</Text>
           </View>
         ) : null}
-      </ScrollView>
+      </AppScrollView>
     </SafeAreaView>
   );
 }
