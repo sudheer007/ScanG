@@ -15,10 +15,9 @@ type Props = {
 };
 
 /**
- * Web: no custom pull-to-refresh UI or gesture.
- * ScrollView clones this around itself — we only pass layout through so the
- * browser's native pull-to-refresh (Chrome address-bar spinner, Cricbuzz-style)
- * can run. In-app PTR was firing mid-scroll and showing a spinner inside content.
+ * Web: pass-through only (no custom pull gesture / spinner).
+ * Custom in-app PTR was firing mid-scroll; browser PTR needs document scroll
+ * which breaks Expo tab isolation. ScrollView still clones this as a wrapper.
  */
 export default function AppRefreshControl({ style, children }: Props) {
   return <View style={[{ flex: 1, minHeight: 0 }, style]}>{children}</View>;

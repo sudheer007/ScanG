@@ -25,9 +25,20 @@ export default function PriceChart({ data, timestamps, width, height, color, sho
   const [touches, setTouches] = useState<number[]>([]); // x positions in chart coords (sorted)
   const containerX = useRef(0);
 
-  const min = useMemo(() => (data.length ? Math.min(...data) : 0), [data]);
-  const max = useMemo(() => (data.length ? Math.max(...data) : 1), [data]);
-  const range = max - min || 1;
+  const minRaw = useMemo(() => (data.length ? Math.min(...data) : 0), [data]);
+  const maxRaw = useMemo(() => (data.length ? Math.max(...data) : 1), [data]);
+  // Pad tiny ranges so 1–2 nearly equal closes don't fill the chart as a fake crash.
+  const { min, max, range } = useMemo(() => {
+    const mid = (minRaw + maxRaw) / 2 || 1;
+    const rawRange = maxRaw - minRaw;
+    const minPad = Math.max(Math.abs(mid) * 0.01, 0.05); // ≥1% of price or $0.05
+    if (rawRange >= minPad) {
+      const pad = rawRange * 0.05;
+      return { min: minRaw - pad, max: maxRaw + pad, range: rawRange + pad * 2 };
+    }
+    const half = minPad / 2;
+    return { min: mid - half, max: mid + half, range: minPad };
+  }, [minRaw, maxRaw]);
 
   const padTop = 28;       // room for the banner
   const padBottom = 12;
@@ -131,8 +142,8 @@ export default function PriceChart({ data, timestamps, width, height, color, sho
         ))}
         <Path d={fillPath} fill={`url(#${id})`} />
         <Path d={linePath} stroke={stroke} strokeWidth={2} fill="none" strokeLinejoin="round" strokeLinecap="round" />
-        <SvgText x={4} y={padTop + 4} fontSize={9} fill={theme.colors.textSubtle}>{max.toFixed(2)}</SvgText>
-        <SvgText x={4} y={height - 2} fontSize={9} fill={theme.colors.textSubtle}>{min.toFixed(2)}</SvgText>
+        <SvgText x={4} y={padTop + 4} fontSize={9} fill={theme.colors.textSubtle}>{maxRaw.toFixed(2)}</SvgText>
+        <SvgText x={4} y={height - 2} fontSize={9} fill={theme.colors.textSubtle}>{minRaw.toFixed(2)}</SvgText>
 
         {/* Crosshair lines + dots */}
         {cross.map((c, i) => (

@@ -14,6 +14,7 @@ import math
 import time
 import logging
 import threading
+import datetime as dt
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -107,11 +108,24 @@ def _safe(v) -> Optional[float]:
 
 
 # ---------- Yahoo HTTP layer ----------
-def _yh_chart(symbol: str, rng: str = "1y", interval: str = "1d") -> Optional[Dict[str, Any]]:
+def _yh_chart(
+    symbol: str,
+    rng: str = "1y",
+    interval: str = "1d",
+    *,
+    include_pre_post: bool = False,
+) -> Optional[Dict[str, Any]]:
     s = _get_session()
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
     try:
-        r = s.get(url, params={"range": rng, "interval": interval, "includePrePost": "false"})
+        r = s.get(
+            url,
+            params={
+                "range": rng,
+                "interval": interval,
+                "includePrePost": "true" if include_pre_post else "false",
+            },
+        )
         if r.status_code != 200:
             return None
         data = r.json().get("chart", {}).get("result")
@@ -819,17 +833,14 @@ async def get_market_indices(market: str) -> List[Dict[str, Any]]:
 
 
 # ---------- History (OHLCV for charts) ----------
-def _fetch_history(symbol: str, period: str, interval: str) -> List[Dict[str, Any]]:
-    key = f"{symbol}:{period}:{interval}"
-    if key in HISTORY_CACHE:
-        return HISTORY_CACHE[key]
-    chart = _yh_chart(symbol, rng=period, interval=interval)
-    if not chart:
-        return []
+_MIN_INTRADAY_POINTS = 12
+
+
+def _history_points_from_chart(chart: Dict[str, Any]) -> List[Dict[str, Any]]:
     df = _chart_to_df(chart)
     if df.empty:
         return []
-    out = []
+    out: List[Dict[str, Any]] = []
     for ts, row in df.iterrows():
         out.append({
             "t": ts.isoformat(),
@@ -839,8 +850,113 @@ def _fetch_history(symbol: str, period: str, interval: str) -> List[Dict[str, An
             "c": _safe(row.get("Close")),
             "v": _safe(row.get("Volume")),
         })
-    HISTORY_CACHE[key] = out
     return out
+
+
+def _chart_previous_close(chart: Optional[Dict[str, Any]]) -> Optional[float]:
+    if not chart:
+        return None
+    meta = chart.get("meta") or {}
+    for key in ("chartPreviousClose", "previousClose"):
+        v = _safe(meta.get(key))
+        if v is not None and v > 0:
+            return v
+    return None
+
+
+def _prepend_previous_close(
+    points: List[Dict[str, Any]],
+    prev_close: Optional[float],
+) -> List[Dict[str, Any]]:
+    """Anchor 1D charts to prior close so day move is visible even with sparse bars."""
+    if prev_close is None or not points:
+        return points
+    first_c = _safe(points[0].get("c"))
+    if first_c is not None and abs(first_c - prev_close) < 1e-9:
+        return points
+    # Place baseline one interval before the first bar (or reuse first timestamp - 1s).
+    first_t = points[0].get("t")
+    baseline_t = first_t
+    try:
+        parsed = dt.datetime.fromisoformat(str(first_t).replace("Z", "+00:00"))
+        baseline_t = (parsed - dt.timedelta(minutes=5)).isoformat()
+    except Exception:
+        pass
+    return [{
+        "t": baseline_t,
+        "o": prev_close,
+        "h": prev_close,
+        "l": prev_close,
+        "c": prev_close,
+        "v": 0,
+    }] + points
+
+
+def _fetch_history(symbol: str, period: str, interval: str) -> List[Dict[str, Any]]:
+    key = f"{symbol}:{period}:{interval}"
+    if key in HISTORY_CACHE:
+        return HISTORY_CACHE[key]
+
+    # For intraday, Yahoo sometimes returns 1–2 bars (esp. after hours). Try fallbacks.
+    attempts: List[tuple[str, str, bool]] = [(period, interval, False)]
+    if period == "1d":
+        attempts.extend([
+            ("1d", "1m", False),
+            ("1d", "5m", True),
+            ("5d", "5m", False),
+            ("5d", "15m", False),
+        ])
+    elif period == "5d" and interval in {"5m", "15m", "30m", "60m", "1h"}:
+        attempts.extend([
+            ("5d", "15m", False),
+            ("5d", "30m", False),
+            ("1mo", "1d", False),
+        ])
+
+    best: List[Dict[str, Any]] = []
+    best_chart: Optional[Dict[str, Any]] = None
+    seen: set[tuple[str, str, bool]] = set()
+
+    for rng, iv, prepost in attempts:
+        sig = (rng, iv, prepost)
+        if sig in seen:
+            continue
+        seen.add(sig)
+        chart = _yh_chart(symbol, rng=rng, interval=iv, include_pre_post=prepost)
+        if not chart:
+            continue
+        points = _history_points_from_chart(chart)
+        # For 5d fallback on a 1d request, keep only the last trading session.
+        if period == "1d" and rng == "5d" and points:
+            try:
+                last_day = dt.datetime.fromisoformat(
+                    str(points[-1]["t"]).replace("Z", "+00:00")
+                ).date()
+                points = [
+                    p for p in points
+                    if dt.datetime.fromisoformat(str(p["t"]).replace("Z", "+00:00")).date() == last_day
+                ]
+            except Exception:
+                points = points[-78:]  # ~1 day of 5m bars
+        if len(points) > len(best):
+            best = points
+            best_chart = chart
+        # Good enough for intraday
+        if period in {"1d", "5d"} and len(points) >= _MIN_INTRADAY_POINTS:
+            best = points
+            best_chart = chart
+            break
+        # Daily+ series: first successful fetch is enough
+        if period not in {"1d", "5d"} and points:
+            best = points
+            best_chart = chart
+            break
+
+    if period == "1d":
+        best = _prepend_previous_close(best, _chart_previous_close(best_chart))
+
+    HISTORY_CACHE[key] = best
+    return best
 
 
 async def get_history(symbol: str, period: str = "1mo", interval: str = "1d"):

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, ActivityIndicator, Dimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -166,6 +166,15 @@ export default function StockDetailScreen() {
     }
   }, [load, loadHistory, loadExtras]);
 
+  const chartSeries = useMemo(() => {
+    const pts = history.filter((p) => p.c != null && Number(p.c) > 0);
+    return {
+      closes: pts.map((p) => Number(p.c)),
+      timestamps: pts.map((p) => p.t),
+    };
+  }, [history]);
+  const screenW = Dimensions.get('window').width;
+
   const toggleWatch = async () => {
     if (!stock) return;
     if (inList) {
@@ -198,8 +207,6 @@ export default function StockDetailScreen() {
   }
 
   const ccy = stock.currency || 'USD';
-  const closes = history.map((p) => p.c || 0).filter((x) => x);
-  const screenW = Dimensions.get('window').width;
   const symbolShort = stock.symbol.replace('.NS', '');
 
   return (
@@ -239,10 +246,14 @@ export default function StockDetailScreen() {
         <View style={styles.chartWrap}>
           {chartLoading ? (
             <View style={styles.chartLoading}><ActivityIndicator color={theme.colors.textMuted} /></View>
+          ) : chartSeries.closes.length < 2 ? (
+            <View style={styles.chartLoading}>
+              <Text style={{ color: theme.colors.textMuted, fontSize: 13 }}>Chart data unavailable</Text>
+            </View>
           ) : (
             <PriceChart
-              data={closes}
-              timestamps={history.map((p) => p.t)}
+              data={chartSeries.closes}
+              timestamps={chartSeries.timestamps}
               width={screenW - 32}
               height={220}
               showPeriodChange
