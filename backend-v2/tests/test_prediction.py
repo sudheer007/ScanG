@@ -72,14 +72,14 @@ def test_bank_nifty_confirmation_boosts_up_score():
     assert s2 > s1  # bank confirmation adds to the UP-leaning score
 
 
-def test_bank_nifty_divergence_can_flip_to_flat():
-    # Weak Nifty momentum, Bank Nifty pulling the other way.
+def test_bank_nifty_divergence_reduces_score():
+    # Weak Nifty momentum, Bank Nifty pulling the other way — score should drop.
     feats_no_bank = {"mom_5s": 0.6, "mom_10s": 0.5, "slope": 0.3, "vol": 0.0, "streak": 1}
     feats_diverging = {**feats_no_bank, "bank_mom_bps": -4.0}
     d1, _, s1 = pred._score_direction(feats_no_bank)
     d2, _, s2 = pred._score_direction(feats_diverging)
     assert d1 == "UP"
-    assert s2 < s1
+    assert s2 < s1  # divergence reduces the bullish score
 
 
 def test_rising_vix_adds_bearish_pressure():
@@ -171,3 +171,15 @@ def test_range_position_bounds():
 def test_from_open_bps_positive_when_above_open():
     tick = _mk_tick(101, datetime(2026, 7, 16, 5, 0, tzinfo=timezone.utc), day_open=100.0)
     assert pred._from_open_bps(tick) > 0
+
+
+def test_verdict_label_maps_prediction_outcomes():
+    assert pred._verdict_label("hit") == "correct"
+    assert pred._verdict_label("miss") == "wrong"
+    assert pred._verdict_label("flat") == "neutral"
+    assert pred._verdict_label(None) == "pending"
+
+
+def test_trading_date_uses_ist_boundary():
+    late_utc = datetime(2026, 7, 16, 20, 0, tzinfo=timezone.utc)
+    assert pred._trading_date_str(late_utc) == "2026-07-17"

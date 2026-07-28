@@ -36,6 +36,9 @@ except Exception:  # pragma: no cover — Windows without tzdata
     _IST = timezone(timedelta(hours=5, minutes=30))
 
 import stock_service as ss
+from pymongo import ASCENDING
+
+import nifty_ml as nm
 
 log = logging.getLogger(__name__)
 
@@ -61,7 +64,7 @@ _SESSION_OPEN = time(9, 15)
 _SESSION_CLOSE = time(15, 30)
 
 # ---- Scorer weights / thresholds ----
-# Directional signal (can flip UP/DOWN/FLAT):
+# Directional signal (can flip UP/DOWN):
 _W_MOM5 = 0.35
 _W_MOM10 = 0.25
 _W_SLOPE = 0.20
@@ -75,7 +78,6 @@ _VIX_CLAMP = 4.0
 _W_NOISE = 0.30   # realized volatility of Nifty ticks
 _W_SPREAD = 0.20  # ETF bid/ask spread (liquidity/uncertainty)
 
-_FLAT_THRESHOLD = 0.35
 _CONF_SCALE = 2.4
 
 
@@ -116,6 +118,8 @@ class PredictionRecord:
     outcome: Optional[str] = None  # "hit" | "miss" | "flat" | None
     price_after: Optional[float] = None
     resolved_at: Optional[datetime] = None
+    actual_direction: Optional[str] = None
+    trading_date: Optional[str] = None
 
 
 @dataclass
@@ -126,11 +130,14 @@ class EngineState:
     last_quote: Optional[Dict[str, Any]] = None
     last_error: Optional[str] = None
     poll_count: int = 0
+    last_minute_prediction_key: Optional[str] = None
+    ewma_vol_bps: float = 1.0
 
 
 _state = EngineState()
 _poll_task: Optional[asyncio.Task] = None
 _lock = asyncio.Lock()
+_history_collection = None
 
 
 def _utcnow() -> datetime:
@@ -145,6 +152,32 @@ def _f(v: Any) -> Optional[float]:
         return f if math.isfinite(f) else None
     except (TypeError, ValueError):
         return None
+
+
+def _ist_now(now: Optional[datetime] = None) -> datetime:
+    return (now or _utcnow()).astimezone(_IST)
+
+
+def _trading_date_str(now: Optional[datetime] = None) -> str:
+    return _ist_now(now).strftime("%Y-%m-%d")
+
+
+def _minute_bucket(now: datetime) -> datetime:
+    return now.replace(second=0, microsecond=0)
+
+
+def _minute_key(now: datetime) -> str:
+    return _minute_bucket(now).astimezone(_IST).strftime("%Y-%m-%dT%H:%M")
+
+
+async def configure_persistence(collection: Any) -> None:
+    global _history_collection
+    _history_collection = collection
+    if _history_collection is None:
+        return
+    await _history_collection.create_index([("minute_key", ASCENDING)], unique=True)
+    await _history_collection.create_index([("trading_date", ASCENDING), ("predicted_at", ASCENDING)])
+    await _history_collection.create_index([("resolved_at", ASCENDING)])
 
 
 def _nse_session_status(now: Optional[datetime] = None) -> str:
@@ -343,6 +376,46 @@ def _from_open_bps(tick: Optional[Tick]) -> float:
     return ((tick.price - tick.day_open) / tick.day_open) * 10000.0
 
 
+def _session_fraction(now: Optional[datetime] = None) -> float:
+    local = _ist_now(now)
+    return nm.session_fraction_ist(local.hour + local.minute / 60.0 + local.second / 3600.0)
+
+
+def _predict_from_features(
+    features: Dict[str, float],
+    horizon_sec: int,
+) -> Tuple[str, float, float, bool, str, Dict[str, Any]]:
+    """Direction, confidence, score, abstain, engine name, ml extras."""
+    ewma = _state.ewma_vol_bps
+    session_frac = _session_fraction()
+    enriched = nm.enrich_features(features, ewma_vol=ewma, session_frac=session_frac)
+    band = nm.deadband_bps(ewma, horizon_sec)
+    ml_res = nm.get_models().predict_ml(enriched, horizon_sec=horizon_sec, ewma_vol=ewma)
+    if ml_res is not None:
+        extras = {
+            "prob_up": ml_res.prob_up,
+            "meta_prob": ml_res.meta_prob,
+            "deadband_bps": ml_res.deadband_bps,
+            "enriched": {k: enriched.get(k) for k in nm.FEATURE_NAMES},
+        }
+        return (
+            ml_res.direction,
+            ml_res.confidence,
+            ml_res.score,
+            ml_res.abstain,
+            ml_res.engine,
+            extras,
+        )
+    direction, confidence, score = _score_direction(features)
+    extras = {
+        "prob_up": None,
+        "meta_prob": None,
+        "deadband_bps": round(band, 3),
+        "enriched": {k: enriched.get(k) for k in nm.FEATURE_NAMES},
+    }
+    return direction, confidence, score, False, "rules", extras
+
+
 def _extract_features(ticks: Deque[Tick]) -> Dict[str, float]:
     latest = ticks[-1] if ticks else None
     return {
@@ -364,10 +437,10 @@ def _extract_features(ticks: Deque[Tick]) -> Dict[str, float]:
 def _score_direction(features: Dict[str, float]) -> Tuple[str, float, float]:
     """Return (direction, confidence_0_100, raw_score).
 
-    Direction is decided only by Nifty's own momentum/slope/streak plus the
-    Bank Nifty and India VIX cross-asset signals — all genuine directional
-    information. Volatility, ETF spread, volume surge, and day-range position
-    only scale *confidence* afterwards; they can never flip UP<->DOWN.
+    Direction is always UP or DOWN — never FLAT.
+    Score > 0 → UP, score <= 0 → DOWN.
+    Bank Nifty and India VIX shape the signal; volatility, ETF spread, volume
+    surge, and day-range position only scale confidence.
     """
     noise = max(0.0, features.get("vol", 0.0))
     spread = max(0.0, features.get("spread_bps", 0.0))
@@ -386,12 +459,7 @@ def _score_direction(features: Dict[str, float]) -> Tuple[str, float, float]:
     damp = 1.0 + _W_NOISE * noise + _W_SPREAD * (spread / 5.0)
     score = signal / damp
 
-    if score > _FLAT_THRESHOLD:
-        direction = "UP"
-    elif score < -_FLAT_THRESHOLD:
-        direction = "DOWN"
-    else:
-        direction = "FLAT"
+    direction = "UP" if score > 0 else "DOWN"
 
     confidence = max(0.0, min(100.0, (abs(score) / _CONF_SCALE) * 100.0))
 
@@ -409,8 +477,6 @@ def _score_direction(features: Dict[str, float]) -> Tuple[str, float, float]:
         confidence *= 0.75  # chasing a move already near the day low
 
     confidence = max(0.0, min(100.0, confidence))
-    if direction == "FLAT":
-        confidence = min(confidence, 40.0)
 
     return direction, round(confidence, 1), round(score, 4)
 
@@ -478,6 +544,9 @@ async def _append_snapshot(quotes: Dict[str, Dict[str, Any]]) -> None:
             last = _state.ticks[-1]
             if abs(last.price - tick.price) < 1e-9 and (tick.ts - last.ts).total_seconds() < 0.4:
                 return
+            if last.price > 0:
+                ret_bps = ((tick.price - last.price) / last.price) * 10000.0
+                _state.ewma_vol_bps = nm.update_ewma_vol(_state.ewma_vol_bps, ret_bps)
         _state.ticks.append(tick)
         _state.last_quote = mapped_quote
         _state.poll_count += 1
@@ -485,6 +554,7 @@ async def _append_snapshot(quotes: Dict[str, Dict[str, Any]]) -> None:
 
 async def _resolve_pending() -> None:
     now = _utcnow()
+    resolved_records: List[PredictionRecord] = []
     async with _lock:
         still_pending: List[PendingOutcome] = []
         for p in _state.pending:
@@ -496,21 +566,10 @@ async def _resolve_pending() -> None:
                 still_pending.append(p)
                 continue
             move = price_after - p.price_at
-            if abs(move) < 1e-9:
-                actual = "FLAT"
-            elif move > 0:
-                actual = "UP"
-            else:
-                actual = "DOWN"
-
-            if p.direction == "FLAT":
-                outcome = "hit" if actual == "FLAT" else "miss"
-            elif actual == "FLAT":
-                outcome = "flat"
-            elif actual == p.direction:
-                outcome = "hit"
-            else:
-                outcome = "miss"
+            band = nm.deadband_bps(_state.ewma_vol_bps, p.horizon_sec)
+            move_bps = nm.move_bps(p.price_at, price_after)
+            actual = nm.actual_direction_from_move(move_bps, band)
+            outcome = nm.outcome_for_prediction(p.direction, actual)
 
             # Update matching history record
             for rec in reversed(_state.history):
@@ -518,8 +577,28 @@ async def _resolve_pending() -> None:
                     rec.outcome = outcome
                     rec.price_after = price_after
                     rec.resolved_at = now
+                    rec.actual_direction = actual
+                    resolved_records.append(rec)
                     break
         _state.pending = still_pending
+
+    if _history_collection is not None:
+        for rec in resolved_records:
+            await _history_collection.update_one(
+                {"id": rec.id},
+                {
+                    "$set": {
+                        "outcome": rec.outcome,
+                        "actual_price": rec.price_after,
+                        "price_after": rec.price_after,
+                        "resolved_at": rec.resolved_at,
+                        "actual_direction": rec.actual_direction,
+                        "status": "resolved",
+                        "verdict": _verdict_label(rec.outcome),
+                        "updated_at": _utcnow(),
+                    }
+                },
+            )
 
 
 def _maybe_record_prediction(
@@ -557,6 +636,76 @@ def _maybe_record_prediction(
     )
 
 
+def _verdict_label(outcome: Optional[str]) -> str:
+    if outcome == "hit":
+        return "correct"
+    if outcome == "miss":
+        return "wrong"
+    if outcome == "flat":
+        return "neutral"
+    return "pending"
+
+
+async def _persist_minute_prediction_if_due() -> None:
+    if _history_collection is None or len(_state.ticks) < 3:
+        return
+    now = _utcnow()
+    minute_start = _minute_bucket(now)
+    minute_key = _minute_key(now)
+
+    async with _lock:
+        if _state.last_minute_prediction_key == minute_key:
+            return
+        latest_tick = _state.ticks[-1] if _state.ticks else None
+        if latest_tick is None:
+            return
+        features = _extract_features(_state.ticks)
+        direction, confidence, raw_score, abstain, engine, ml_extra = _predict_from_features(
+            features, 60
+        )
+        if abstain or direction == "FLAT":
+            _state.last_minute_prediction_key = minute_key
+            return
+
+        signals = _build_signals(features, latest_tick)
+        price = latest_tick.price
+        _maybe_record_prediction(60, direction, confidence, float(price))
+        record = _state.history[-1]
+        record.trading_date = _trading_date_str(minute_start)
+        _state.last_minute_prediction_key = minute_key
+
+    doc = {
+        "id": record.id,
+        "symbol": SYMBOL,
+        "name": "Nifty 50",
+        "minute_key": minute_key,
+        "trading_date": _trading_date_str(minute_start),
+        "horizon_sec": 60,
+        "direction": direction,
+        "confidence": confidence,
+        "score": raw_score,
+        "predicted_price": price,
+        "price_at": price,
+        "predicted_at": record.predicted_at,
+        "resolve_at": record.predicted_at + timedelta(seconds=60),
+        "actual_price": None,
+        "price_after": None,
+        "actual_direction": None,
+        "outcome": None,
+        "verdict": "pending",
+        "status": "pending",
+        "signals": signals,
+        "features": {**features, "ewma_vol": _state.ewma_vol_bps, "session_frac": _session_fraction()},
+        "engine": engine,
+        "created_at": _utcnow(),
+    }
+    await _history_collection.update_one(
+        {"minute_key": minute_key},
+        {"$setOnInsert": doc, "$set": {"updated_at": _utcnow()}},
+        upsert=True,
+    )
+
+
 async def _poll_once() -> None:
     try:
         quotes = await ss.get_raw_quotes(BASKET_SYMBOLS)
@@ -568,6 +717,8 @@ async def _poll_once() -> None:
     except Exception as e:
         _state.last_error = str(e)
         log.warning("nifty poll failed: %s", e)
+    if _nse_session_status() == "open":
+        await _persist_minute_prediction_if_due()
     await _resolve_pending()
 
 
@@ -596,6 +747,7 @@ def start_poller() -> None:
     global _poll_task
     if _poll_task is not None and not _poll_task.done():
         return
+    nm.try_load_models()
     _poll_task = asyncio.create_task(_poll_loop())
 
 
@@ -612,41 +764,77 @@ async def stop_poller() -> None:
 
 
 def _hit_stats(horizon: Optional[int] = None) -> Dict[str, Any]:
-    records = [
+    scoped = [
         r for r in _state.history
-        if r.outcome in ("hit", "miss", "flat")
-        and (horizon is None or r.horizon_sec == horizon)
+        if (horizon is None or r.horizon_sec == horizon)
     ]
-    if not records:
-        return {"n": 0, "hits": 0, "misses": 0, "flats": 0, "hit_rate": None}
-    hits = sum(1 for r in records if r.outcome == "hit")
-    misses = sum(1 for r in records if r.outcome == "miss")
-    flats = sum(1 for r in records if r.outcome == "flat")
-    decided = hits + misses
+    scored = [r for r in scoped if r.outcome in ("hit", "miss")]
+    flats = [r for r in scoped if r.outcome == "flat"]
+    if not scored:
+        return {
+            "n": 0,
+            "hits": 0,
+            "misses": 0,
+            "flats": len(flats),
+            "hit_rate": None,
+        }
+    hits = sum(1 for r in scored if r.outcome == "hit")
+    misses = sum(1 for r in scored if r.outcome == "miss")
     return {
-        "n": len(records),
+        "n": len(scored),
         "hits": hits,
         "misses": misses,
-        "flats": flats,
-        "hit_rate": round(hits / decided, 4) if decided else None,
+        "flats": len(flats),
+        "hit_rate": round(hits / len(scored), 4) if scored else None,
     }
 
 
 def get_stats() -> Dict[str, Any]:
     by_horizon = {str(h): _hit_stats(h) for h in HORIZONS}
+    baselines = nm.baseline_hit_rates(list(_state.history))
     return {
         "symbol": SYMBOL,
         "overall": _hit_stats(),
         "by_horizon": by_horizon,
+        "baselines": baselines,
+        "model_loaded": nm.get_models().is_ready(),
+        "model_path": nm.get_models().loaded_path,
         "poll_count": _state.poll_count,
         "tick_count": len(_state.ticks),
+        "ewma_vol_bps": round(_state.ewma_vol_bps, 4),
         "session": _nse_session_status(),
         "disclaimer": DISCLAIMER,
     }
 
 
-def get_history(limit: int = 50) -> Dict[str, Any]:
+async def get_history(limit: int = 50) -> Dict[str, Any]:
     limit = max(1, min(200, limit))
+    if _history_collection is not None:
+        docs = await _history_collection.find(
+            {},
+            {"_id": 0},
+            sort=[("predicted_at", -1)],
+            limit=limit,
+        ).to_list(length=limit)
+        return {
+            "symbol": SYMBOL,
+            "count": len(docs),
+            "predictions": [
+                {
+                    "id": d["id"],
+                    "horizon_sec": d.get("horizon_sec", 60),
+                    "direction": d.get("direction"),
+                    "confidence": d.get("confidence"),
+                    "price_at": d.get("predicted_price", d.get("price_at")),
+                    "predicted_at": d["predicted_at"].isoformat() if isinstance(d.get("predicted_at"), datetime) else d.get("predicted_at"),
+                    "outcome": d.get("outcome"),
+                    "price_after": d.get("actual_price", d.get("price_after")),
+                    "resolved_at": d["resolved_at"].isoformat() if isinstance(d.get("resolved_at"), datetime) else d.get("resolved_at"),
+                }
+                for d in docs
+            ],
+            "disclaimer": DISCLAIMER,
+        }
     items = list(_state.history)[-limit:]
     items.reverse()
     return {
@@ -670,6 +858,83 @@ def get_history(limit: int = 50) -> Dict[str, Any]:
     }
 
 
+async def list_log_dates(limit: int = 31) -> Dict[str, Any]:
+    limit = max(1, min(180, limit))
+    if _history_collection is None:
+        dates = sorted({r.trading_date for r in _state.history if r.trading_date}, reverse=True)[:limit]
+        return {"symbol": SYMBOL, "dates": dates}
+    pipeline = [
+        {"$group": {"_id": "$trading_date", "count": {"$sum": 1}}},
+        {"$sort": {"_id": -1}},
+        {"$limit": limit},
+    ]
+    rows = await _history_collection.aggregate(pipeline).to_list(length=limit)
+    return {
+        "symbol": SYMBOL,
+        "dates": [{"date": row["_id"], "count": row["count"]} for row in rows if row.get("_id")],
+    }
+
+
+async def get_logs_for_date(trading_date: str, limit: int = 500) -> Dict[str, Any]:
+    limit = max(1, min(1000, limit))
+    if _history_collection is None:
+        items = [
+            r for r in _state.history
+            if r.trading_date == trading_date and r.horizon_sec == 60
+        ]
+        items.sort(key=lambda r: r.predicted_at)
+        items = items[:limit]
+        return {
+            "symbol": SYMBOL,
+            "date": trading_date,
+            "count": len(items),
+            "logs": [
+                {
+                    "id": r.id,
+                    "predicted_at": r.predicted_at.isoformat(),
+                    "resolved_at": r.resolved_at.isoformat() if r.resolved_at else None,
+                    "predicted_price": r.price_at,
+                    "actual_price": r.price_after,
+                    "direction": r.direction,
+                    "actual_direction": r.actual_direction,
+                    "status": "resolved" if r.outcome else "pending",
+                    "verdict": _verdict_label(r.outcome),
+                    "outcome": r.outcome,
+                }
+                for r in items
+            ],
+            "disclaimer": DISCLAIMER,
+        }
+
+    docs = await _history_collection.find(
+        {"trading_date": trading_date, "horizon_sec": 60},
+        {"_id": 0},
+        sort=[("predicted_at", ASCENDING)],
+        limit=limit,
+    ).to_list(length=limit)
+    return {
+        "symbol": SYMBOL,
+        "date": trading_date,
+        "count": len(docs),
+        "logs": [
+            {
+                "id": d["id"],
+                "predicted_at": d["predicted_at"].isoformat() if isinstance(d.get("predicted_at"), datetime) else d.get("predicted_at"),
+                "resolved_at": d["resolved_at"].isoformat() if isinstance(d.get("resolved_at"), datetime) else d.get("resolved_at"),
+                "predicted_price": d.get("predicted_price", d.get("price_at")),
+                "actual_price": d.get("actual_price", d.get("price_after")),
+                "direction": d.get("direction"),
+                "actual_direction": d.get("actual_direction"),
+                "status": d.get("status", "pending"),
+                "verdict": d.get("verdict", "pending"),
+                "outcome": d.get("outcome"),
+            }
+            for d in docs
+        ],
+        "disclaimer": DISCLAIMER,
+    }
+
+
 async def get_prediction(horizon: int = 10) -> Dict[str, Any]:
     if horizon not in HORIZONS:
         raise ValueError(f"horizon must be one of {HORIZONS}")
@@ -685,11 +950,30 @@ async def get_prediction(horizon: int = 10) -> Dict[str, Any]:
         price = _state.ticks[-1].price
 
     features = _extract_features(_state.ticks) if _state.ticks else {}
-    direction, confidence, raw_score = _score_direction(features) if features else ("FLAT", 0.0, 0.0)
+    abstain = False
+    engine = "rules"
+    ml_extra: Dict[str, Any] = {}
+    if features:
+        features = {
+            **features,
+            "ewma_vol": _state.ewma_vol_bps,
+            "session_frac": _session_fraction(),
+        }
+        direction, confidence, raw_score, abstain, engine, ml_extra = _predict_from_features(
+            features, horizon
+        )
+    else:
+        direction, confidence, raw_score = "FLAT", 0.0, 0.0
     latest_tick = _state.ticks[-1] if _state.ticks else None
     signals = _build_signals(features, latest_tick)
 
-    if session == "open" and price is not None and len(_state.ticks) >= 3:
+    if (
+        session == "open"
+        and price is not None
+        and len(_state.ticks) >= 3
+        and not abstain
+        and direction in ("UP", "DOWN")
+    ):
         async with _lock:
             _maybe_record_prediction(horizon, direction, confidence, float(price))
 
@@ -699,6 +983,7 @@ async def get_prediction(horizon: int = 10) -> Dict[str, Any]:
     ]
 
     horizon_stats = _hit_stats(horizon)
+    band = ml_extra.get("deadband_bps") or nm.deadband_bps(_state.ewma_vol_bps, horizon)
     return {
         "symbol": SYMBOL,
         "name": "Nifty 50",
@@ -707,9 +992,14 @@ async def get_prediction(horizon: int = 10) -> Dict[str, Any]:
         "change": quote.get("change"),
         "change_pct": quote.get("change_pct"),
         "horizon_sec": horizon,
-        "direction": direction if session == "open" else "FLAT",
-        "confidence": confidence if session == "open" else 0.0,
+        "direction": direction,
+        "confidence": confidence,
         "score": raw_score,
+        "abstain": abstain,
+        "engine": engine,
+        "deadband_bps": band,
+        "prob_up": ml_extra.get("prob_up"),
+        "meta_prob": ml_extra.get("meta_prob"),
         "features": features,
         "signals": signals,
         "as_of": _utcnow().isoformat(),
@@ -720,6 +1010,7 @@ async def get_prediction(horizon: int = 10) -> Dict[str, Any]:
             "n": horizon_stats.get("n"),
             "hits": horizon_stats.get("hits"),
             "misses": horizon_stats.get("misses"),
+            "flats": horizon_stats.get("flats"),
         },
         "poll_count": _state.poll_count,
         "last_error": _state.last_error,

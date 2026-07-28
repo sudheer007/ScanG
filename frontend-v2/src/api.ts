@@ -345,6 +345,11 @@ export interface NiftyPredictResponse {
   direction: NiftyDirection;
   confidence: number;
   score: number;
+  abstain?: boolean;
+  engine?: 'ml' | 'rules' | string;
+  deadband_bps?: number;
+  prob_up?: number | null;
+  meta_prob?: number | null;
   features: Record<string, number>;
   signals: NiftySignals;
   as_of: string;
@@ -400,6 +405,37 @@ export interface NiftyPredictStatsResponse {
   poll_count: number;
   tick_count: number;
   session: 'open' | 'closed';
+  disclaimer: string;
+}
+
+export interface NiftyPredictionLogDate {
+  date: string;
+  count: number;
+}
+
+export interface NiftyPredictionLogDatesResponse {
+  symbol: string;
+  dates: NiftyPredictionLogDate[];
+}
+
+export interface NiftyPredictionDailyLogItem {
+  id: string;
+  predicted_at: string;
+  resolved_at: string | null;
+  predicted_price: number;
+  actual_price: number | null;
+  direction: NiftyDirection;
+  actual_direction: NiftyDirection | null;
+  status: 'pending' | 'resolved';
+  verdict: 'pending' | 'correct' | 'wrong';
+  outcome: 'hit' | 'miss' | 'flat' | null;
+}
+
+export interface NiftyPredictionDailyLogsResponse {
+  symbol: string;
+  date: string;
+  count: number;
+  logs: NiftyPredictionDailyLogItem[];
   disclaimer: string;
 }
 
@@ -479,6 +515,10 @@ export const api = {
     http<NiftyPredictResponse>(`/predict/nifty?horizon=${horizon}`),
   niftyPredictHistory: (limit = 50) =>
     http<NiftyPredictHistoryResponse>(`/predict/nifty/history?limit=${limit}`),
+  niftyPredictionLogDates: (limit = 31) =>
+    http<NiftyPredictionLogDatesResponse>(`/predict/nifty/log-dates?limit=${limit}`),
+  niftyPredictionLogsByDate: (date: string, limit = 500) =>
+    http<NiftyPredictionDailyLogsResponse>(`/predict/nifty/logs?date=${encodeURIComponent(date)}&limit=${limit}`),
   niftyPredictStats: () => http<NiftyPredictStatsResponse>(`/predict/nifty/stats`),
 
   // ---- Ingestion admin (Phase 3) ----

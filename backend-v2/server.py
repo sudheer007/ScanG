@@ -469,7 +469,28 @@ async def predict_nifty_history(
     limit: int = Query(50, ge=1, le=200),
 ):
     pred.start_poller()
-    return pred.get_history(limit)
+    return await pred.get_history(limit)
+
+
+@api_router.get("/predict/nifty/log-dates")
+@limiter.limit("30/minute")
+async def predict_nifty_log_dates(
+    request: Request,
+    limit: int = Query(31, ge=1, le=180),
+):
+    pred.start_poller()
+    return await pred.list_log_dates(limit)
+
+
+@api_router.get("/predict/nifty/logs")
+@limiter.limit("30/minute")
+async def predict_nifty_logs(
+    request: Request,
+    date: str = Query(..., description="Trading date in YYYY-MM-DD (IST)"),
+    limit: int = Query(500, ge=1, le=1000),
+):
+    pred.start_poller()
+    return await pred.get_logs_for_date(date, limit)
 
 
 @api_router.get("/predict/nifty/stats")
@@ -1185,6 +1206,7 @@ async def prewarm():
 
     async def _warm():
         try:
+            await pred.configure_persistence(db.nifty_prediction_logs)
             await ss.get_markets_overview_fast("US", limit=10)
             logger.info("Markets overview cache prewarmed for US")
             await ss.get_market_universe("US")

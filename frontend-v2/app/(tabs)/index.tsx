@@ -292,7 +292,7 @@ export default function MarketsScreen() {
             {tab === 'overview' && (
               <OverviewTab
                 indices={indices} gainers={gainers} losers={losers} sectors={sectors}
-                breadthPct={breadthPct} onStock={goStock} onSeeMore={() => setTab('movers')}
+                breadthPct={breadthPct} onSeeMore={() => setTab('movers')}
                 onSectors={() => setTab('sectors')} onSectorSelect={openSector}
               />
             )}
@@ -334,20 +334,19 @@ export default function MarketsScreen() {
 }
 
 // ---------------- Overview ----------------
-function OverviewTab({ indices, gainers, losers, sectors, breadthPct, onStock, onSeeMore, onSectors, onSectorSelect }: {
+function OverviewTab({ indices, gainers, losers, sectors, breadthPct, onSeeMore, onSectors, onSectorSelect }: {
   indices: IndexQuote[]; gainers: Stock[]; losers: Stock[]; sectors: SectorRow[];
-  breadthPct: number; onStock: (s: string) => void; onSeeMore: () => void;
+  breadthPct: number; onSeeMore: () => void;
   onSectors: () => void; onSectorSelect: (sector: string) => void;
 }) {
   const topSectors = [...sectors].slice(0, 6);
+  const indexCards = indices.slice(0, 5);
   return (
     <>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.indicesRow} style={styles.indicesScroll} testID="indices-row">
-        {indices.map((idx) => (
-          <TouchableOpacity
+        {indexCards.map((idx) => (
+          <View
             key={idx.symbol}
-            activeOpacity={0.8}
-            onPress={() => onStock(idx.symbol)}
             style={styles.indexCard}
             testID={`index-card-${idx.symbol}`}
           >
@@ -357,7 +356,7 @@ function OverviewTab({ indices, gainers, losers, sectors, breadthPct, onStock, o
               <Text style={[styles.indexChange, { color: changeColor(idx.change_pct) }]}>{fmtPct(idx.change_pct)}</Text>
               <Sparkline data={idx.sparkline || []} width={60} height={20} />
             </View>
-          </TouchableOpacity>
+          </View>
         ))}
       </ScrollView>
 

@@ -6,6 +6,12 @@
 cd backend-v2
 pip install -r requirements.txt
 uvicorn server:app --reload --host 0.0.0.0 --port 8000
+python scripts/train_nifty_pulse_model.py
+curl http://127.0.0.1:8000/api/predict/nifty?horizon=60
+
+
+- LightGBM classifier + vol-normalized features + meta-label abstention + GARCH deadband, 
+
 ```
 
 ## Portfolio import (PDF / images)
@@ -22,6 +28,16 @@ If Tesseract is missing, image and scanned-PDF imports return `503 OCR is not av
 
 ## Environment
 
-Copy [`.env.example`](.env.example) to `.env` and set `MONGO_URL`, `DB_NAME`, and Firebase credentials.
+Copy `[.env.example](.env.example)` to `.env` and set `MONGO_URL`, `DB_NAME`, and Firebase credentials.
 
-On Render / Docker, prefer `FIREBASE_CREDENTIALS_JSON` (full service-account JSON as one line) instead of a file path. See the root [`DEPLOYMENT.md`](../DEPLOYMENT.md) and [`Dockerfile`](Dockerfile).
+## Nifty pulse ML model
+
+During market hours the backend logs per-minute features to Mongo (`nifty_prediction_logs`). After you have enough resolved rows, train the primary + meta-label models:
+
+```bash
+cd backend-v2
+pip install -r requirements.txt
+python scripts/train_nifty_pulse_model.py
+```
+
+The artifact is written to `models/nifty_pulse.joblib` (override with `NIFTY_MODEL_PATH`). Restart the API so `start_poller()` loads it. Until then, predictions use the rule-based scorer with vol-scaled deadbands for hit/miss labels.

@@ -134,7 +134,7 @@ async function openExternal(url: string) {
 export default function ProfileScreen() {
   const router = useRouter();
   const { user, profile, signOut } = useAuth();
-  const { isPremium, refresh: refreshEntitlement } = useEntitlement();
+  const { isPremium, hydrated, refresh: refreshEntitlement } = useEntitlement();
   const [pressedKey, setPressedKey] = useState<string | null>(null);
   const [showShare, setShowShare] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -349,19 +349,25 @@ export default function ProfileScreen() {
             <Text style={styles.name} numberOfLines={1}>
               {name}
             </Text>
-            <View
-              testID={isPremium ? 'profile-tag-premium' : 'profile-tag-basic'}
-              style={[styles.planTag, isPremium ? styles.planTagPremium : styles.planTagBasic]}
-            >
-              <Ionicons
-                name={isPremium ? 'diamond' : 'shield-outline'}
-                size={11}
-                color={isPremium ? PREMIUM_GOLD : BASIC_SLATE}
-              />
-              <Text style={[styles.planTagText, isPremium ? styles.planTagTextPremium : styles.planTagTextBasic]}>
-                {isPremium ? 'Premium' : 'Basic'}
-              </Text>
-            </View>
+            {!hydrated && !isPremium ? (
+              <View testID="profile-tag-loading" style={[styles.planTag, styles.planTagLoading]}>
+                <Text style={[styles.planTagText, styles.planTagTextLoading]}>· · ·</Text>
+              </View>
+            ) : (
+              <View
+                testID={isPremium ? 'profile-tag-premium' : 'profile-tag-basic'}
+                style={[styles.planTag, isPremium ? styles.planTagPremium : styles.planTagBasic]}
+              >
+                <Ionicons
+                  name={isPremium ? 'diamond' : 'shield-outline'}
+                  size={11}
+                  color={isPremium ? PREMIUM_GOLD : BASIC_SLATE}
+                />
+                <Text style={[styles.planTagText, isPremium ? styles.planTagTextPremium : styles.planTagTextBasic]}>
+                  {isPremium ? 'Premium' : 'Basic'}
+                </Text>
+              </View>
+            )}
           </View>
         </View>
 
@@ -585,6 +591,12 @@ const styles = StyleSheet.create({
     backgroundColor: BASIC_DIM,
     borderColor: BASIC_BORDER,
   },
+  planTagLoading: {
+    backgroundColor: theme.colors.bg3,
+    borderColor: theme.colors.border,
+    minWidth: 52,
+    justifyContent: 'center',
+  },
   planTagText: {
     fontSize: 11,
     fontWeight: '800',
@@ -593,6 +605,7 @@ const styles = StyleSheet.create({
   },
   planTagTextPremium: { color: PREMIUM_GOLD },
   planTagTextBasic: { color: BASIC_SLATE },
+  planTagTextLoading: { color: theme.colors.textSubtle, letterSpacing: 1.5 },
   actions: { gap: 12, marginBottom: theme.spacing.xl },
   actionCard: {
     flexDirection: 'row',
