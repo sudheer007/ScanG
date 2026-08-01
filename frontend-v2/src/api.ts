@@ -427,7 +427,7 @@ export interface NiftyPredictionDailyLogItem {
   direction: NiftyDirection;
   actual_direction: NiftyDirection | null;
   status: 'pending' | 'resolved';
-  verdict: 'pending' | 'correct' | 'wrong';
+  verdict: 'pending' | 'correct' | 'wrong' | 'neutral';
   outcome: 'hit' | 'miss' | 'flat' | null;
 }
 

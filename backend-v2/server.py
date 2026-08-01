@@ -1207,6 +1207,12 @@ async def prewarm():
     async def _warm():
         try:
             await pred.configure_persistence(db.nifty_prediction_logs)
+            # Start poller as soon as Mongo is ready so 1m logs are not missed
+            # while markets/universe warm-up hits Yahoo.
+            try:
+                pred.start_poller()
+            except Exception as e:
+                logger.warning(f"prediction poller start failed: {e}")
             await ss.get_markets_overview_fast("US", limit=10)
             logger.info("Markets overview cache prewarmed for US")
             await ss.get_market_universe("US")
@@ -1218,7 +1224,7 @@ async def prewarm():
         except Exception as e:
             logger.warning(f"prewarm failed: {e}")
         finally:
-            # Start after warm-up so poller does not compete with first-load Yahoo traffic.
+            # Idempotent — ensures poller is up even if configure_persistence failed earlier.
             try:
                 pred.start_poller()
             except Exception as e:

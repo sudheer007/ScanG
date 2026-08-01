@@ -39,11 +39,19 @@ const HORIZON_OPTIONS: { value: Horizon; label: string }[] = [
 ];
 const HORIZON_VALUES = new Set<string>(HORIZON_OPTIONS.map((o) => o.value));
 const HORIZON_STORAGE_KEY = 'nifty_pulse_horizon';
+const LOG_DATE_STORAGE_KEY = 'nifty_pulse_log_date';
+const DATE_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function parseHorizon(value: unknown, fallback: Horizon = '10'): Horizon {
   const raw = Array.isArray(value) ? value[0] : value;
   const s = String(raw ?? '');
   return HORIZON_VALUES.has(s) ? (s as Horizon) : fallback;
+}
+
+function parseLogDate(value: unknown, fallback: string): string {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const s = String(raw ?? '').trim();
+  return DATE_KEY_RE.test(s) ? s : fallback;
 }
 
 const POLL_MS = 5000; // match slower backend Yahoo poll; was 1.5s
@@ -105,10 +113,27 @@ function shiftMonth(monthStart: string, delta: number): string {
   return formatLocalDateKey(dt).slice(0, 7) + '-01';
 }
 
-function verdictColor(verdict: 'pending' | 'correct' | 'wrong'): string {
+function verdictColor(verdict: 'pending' | 'correct' | 'wrong' | 'neutral'): string {
   if (verdict === 'correct') return theme.colors.success;
   if (verdict === 'wrong') return theme.colors.error;
+  if (verdict === 'neutral') return theme.colors.textMuted;
   return theme.colors.warning;
+}
+
+function summarizeLogVerdicts(logs: NiftyPredictionDailyLogItem[]) {
+  let correct = 0;
+  let wrong = 0;
+  let pending = 0;
+  let flat = 0;
+  for (const item of logs) {
+    const verdict = item.verdict;
+    const outcome = item.outcome;
+    if (verdict === 'correct' || outcome === 'hit') correct += 1;
+    else if (verdict === 'wrong' || outcome === 'miss') wrong += 1;
+    else if (verdict === 'neutral' || outcome === 'flat') flat += 1;
+    else pending += 1;
+  }
+  return { correct, wrong, pending, flat, total: logs.length };
 }
 
 function buildCalendarCells(
@@ -175,7 +200,7 @@ function toneColor(tone: 'pos' | 'neg' | 'neutral'): string {
 
 export default function NiftyPulseScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ horizon?: string | string[] }>();
+  const params = useLocalSearchParams<{ horizon?: string | string[]; date?: string | string[] }>();
   const [horizon, setHorizon] = useState<Horizon>(() => parseHorizon(params.horizon, '10'));
   const [data, setData] = useState<NiftyPredictResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -191,8 +216,9 @@ export default function NiftyPulseScreen() {
   const windowHorizonRef = useRef<number>(10);
   const pendingResRef = useRef<NiftyPredictResponse | null>(null);
   const mountedRef = useRef(true);
-  const [selectedDate, setSelectedDate] = useState(() => toIstDateString());
-  const [calendarMonth, setCalendarMonth] = useState(() => startOfMonth(toIstDateString()));
+  const todayIst = toIstDateString();
+  const [selectedDate, setSelectedDate] = useState(() => parseLogDate(params.date, todayIst));
+  const [calendarMonth, setCalendarMonth] = useState(() => startOfMonth(parseLogDate(params.date, todayIst)));
   const [logDates, setLogDates] = useState<NiftyPredictionLogDate[]>([]);
   const [logData, setLogData] = useState<NiftyPredictionDailyLogsResponse | null>(null);
   const [logsLoading, setLogsLoading] = useState(true);
@@ -320,6 +346,37 @@ export default function NiftyPulseScreen() {
   }, []);
 
   useEffect(() => {
+    const today = toIstDateString();
+    const fromUrl = params.date != null ? parseLogDate(params.date, '') : '';
+    if (fromUrl) {
+      if (fromUrl !== selectedDate) {
+        setSelectedDate(fromUrl);
+        setCalendarMonth(startOfMonth(fromUrl));
+      }
+      return;
+    }
+    let cancelled = false;
+    void storage.getItem(LOG_DATE_STORAGE_KEY, today).then((saved) => {
+      if (cancelled) return;
+      const restored = parseLogDate(saved, today);
+      setSelectedDate(restored);
+      setCalendarMonth(startOfMonth(restored));
+      router.setParams({ date: restored });
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const selectLogDate = useCallback((date: string) => {
+    setSelectedDate(date);
+    setCalendarMonth(startOfMonth(date));
+    void storage.setItem(LOG_DATE_STORAGE_KEY, date);
+    router.setParams({ date });
+  }, [router]);
+
+  useEffect(() => {
     const id = setInterval(() => {
       if (windowStartRef.current == null) {
         setCountdown(0);
@@ -377,6 +434,11 @@ export default function NiftyPulseScreen() {
         : rows;
     return [...filtered].reverse();
   }, [logData, selectedDate]);
+
+  const logVerdictStats = useMemo(
+    () => summarizeLogVerdicts(visibleLogs),
+    [visibleLogs],
+  );
 
   if (loading && !data) {
     return (
@@ -533,8 +595,7 @@ export default function NiftyPulseScreen() {
                     style={styles.dayCellWrap}
                     activeOpacity={0.65}
                     onPress={() => {
-                      setSelectedDate(cell.date);
-                      setCalendarMonth(startOfMonth(cell.date));
+                      selectLogDate(cell.date);
                     }}
                     accessibilityRole="button"
                     accessibilityState={{ selected: cell.isSelected }}
@@ -582,8 +643,35 @@ export default function NiftyPulseScreen() {
                 ) : null}
               </View>
               <Text style={styles.logsCount}>
-                {logsRefreshing ? 'Refreshing…' : `${logData?.count ?? 0} rows`}
+                {logsRefreshing ? 'Refreshing…' : `${logVerdictStats.total} rows`}
               </Text>
+            </View>
+
+            <View style={styles.verdictStatsRow} testID="nifty-log-verdict-stats">
+              <View style={[styles.verdictStatChip, styles.verdictStatCorrect]}>
+                <Text style={[styles.verdictStatValue, { color: theme.colors.success }]}>
+                  {logVerdictStats.correct}
+                </Text>
+                <Text style={styles.verdictStatLabel}>Correct</Text>
+              </View>
+              <View style={[styles.verdictStatChip, styles.verdictStatWrong]}>
+                <Text style={[styles.verdictStatValue, { color: theme.colors.error }]}>
+                  {logVerdictStats.wrong}
+                </Text>
+                <Text style={styles.verdictStatLabel}>Wrong</Text>
+              </View>
+              <View style={[styles.verdictStatChip, styles.verdictStatPending]}>
+                <Text style={[styles.verdictStatValue, { color: theme.colors.warning }]}>
+                  {logVerdictStats.pending}
+                </Text>
+                <Text style={styles.verdictStatLabel}>Pending</Text>
+              </View>
+              <View style={[styles.verdictStatChip, styles.verdictStatFlat]}>
+                <Text style={[styles.verdictStatValue, { color: theme.colors.textMuted }]}>
+                  {logVerdictStats.flat}
+                </Text>
+                <Text style={styles.verdictStatLabel}>Neutral</Text>
+              </View>
             </View>
 
             {logsLoading ? (
@@ -948,6 +1036,47 @@ const styles = StyleSheet.create({
   logsTitle: { color: theme.colors.text, fontSize: 16, fontWeight: '700' },
   logsLatest: { color: theme.colors.textMuted, fontSize: 11, marginTop: 2 },
   logsCount: { color: theme.colors.textMuted, fontSize: 12 },
+  verdictStatsRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  verdictStatChip: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    borderRadius: theme.radius.sm,
+    borderWidth: 1,
+    gap: 2,
+  },
+  verdictStatCorrect: {
+    backgroundColor: 'rgba(16,185,129,0.08)',
+    borderColor: 'rgba(16,185,129,0.28)',
+  },
+  verdictStatWrong: {
+    backgroundColor: 'rgba(239,68,68,0.08)',
+    borderColor: 'rgba(239,68,68,0.28)',
+  },
+  verdictStatPending: {
+    backgroundColor: 'rgba(245,158,11,0.08)',
+    borderColor: 'rgba(245,158,11,0.28)',
+  },
+  verdictStatFlat: {
+    backgroundColor: theme.colors.bg3,
+    borderColor: theme.colors.border,
+  },
+  verdictStatValue: {
+    fontSize: 16,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+  },
+  verdictStatLabel: {
+    color: theme.colors.textSubtle,
+    fontSize: 10,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
   logsEmpty: { color: theme.colors.textMuted, fontSize: 13, lineHeight: 18 },
   emptyTableRow: {
     paddingVertical: 18,

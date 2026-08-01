@@ -87,16 +87,36 @@ Copy values from local [`frontend-v2/.env`](frontend-v2/.env.example) / Firebase
 
 ### Keep the API awake (strongly recommended)
 
-Render free web services sleep after ~15 minutes with no traffic. That cold start is the main reason live users see a blank/slow Markets screen.
+Render free web services sleep after ~15 minutes with no traffic. While asleep, the Nifty 1m prediction poller cannot write rows.
 
-1. After deploy, copy your API health URL: `https://scang-api-xxxx.onrender.com/api/health`
-2. Create a free job at [cron-job.org](https://cron-job.org) (or UptimeRobot):
-   - Method: `GET`
-   - URL: the health URL above
-   - Interval: every **10–14 minutes**
-3. Optional: enable the GitHub Action [`.github/workflows/keep-api-warm.yml`](.github/workflows/keep-api-warm.yml) and set repo secret `SCANG_API_HEALTH_URL` to the same health URL.
+**Option A — Cloudflare Worker (recommended)**
 
-While the process is awake, the backend now keeps Markets overview caches warm and builds the full stock universe once (shared across Discover / Radar / Screener) so stock lists appear much faster.
+Steadier timing than GitHub cron. Files: [`cloudflare/keep-api-warm/`](cloudflare/keep-api-warm/).
+
+```bash
+cd cloudflare/keep-api-warm
+npm install
+npx wrangler login
+npm run deploy
+npx wrangler secret put HEALTH_URL
+# paste: https://scang-api-xxxx.onrender.com/api/health
+```
+
+Cron: every **5 minutes**, Mon–Fri, NSE hours (IST). Full steps in [`cloudflare/keep-api-warm/README.md`](cloudflare/keep-api-warm/README.md).
+
+**Option B — GitHub Action (backup)**
+
+1. Copy your API health URL: `https://scang-api-xxxx.onrender.com/api/health`
+2. GitHub → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**
+   - Name: `SCANG_API_HEALTH_URL`
+   - Value: the health URL above
+3. Workflow: [`.github/workflows/keep-api-warm.yml`](.github/workflows/keep-api-warm.yml)
+
+**Option C — External ping**
+
+[cron-job.org](https://cron-job.org) or [UptimeRobot](https://uptimerobot.com): `GET` the health URL every **5 minutes**.
+
+While the process is awake, the backend keeps Markets overview caches warm and builds the full stock universe once (shared across Discover / Radar / Screener) so stock lists appear much faster.
 
 Upgrading the API off free tier also removes sleep entirely (uses the 750 free hours only if you stay on free).
 

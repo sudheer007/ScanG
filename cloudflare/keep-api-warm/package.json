@@ -1,0 +1,12 @@
+{
+  "name": "scang-keep-api-warm",
+  "private": true,
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^4.14.0"
+  }
+}

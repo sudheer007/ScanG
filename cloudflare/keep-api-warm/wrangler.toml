@@ -1,0 +1,17 @@
+name = "scang-keep-api-warm"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+workers_dev = true
+
+# Every 5 minutes, Mon–Fri, ~03:00–10:59 UTC ≈ NSE hours IST (+ buffer).
+# Free Workers: Cron Triggers are available on the free plan (check Cloudflare docs).
+[triggers]
+crons = ["*/5 3-10 * * 1-5"]
+
+# Set after deploy:
+#   npx wrangler secret put HEALTH_URL
+# Value example: https://scang-api-xxxx.onrender.com/api/health
+#
+# Or for local / non-secret testing, uncomment and fill:
+# [vars]
+# HEALTH_URL = "https://scang-api-xxxx.onrender.com/api/health"

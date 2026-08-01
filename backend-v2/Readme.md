@@ -12,6 +12,7 @@ curl http://127.0.0.1:8000/api/predict/nifty?horizon=60
 
 - LightGBM classifier + vol-normalized features + meta-label abstention + GARCH deadband, 
 
+
 ```
 
 ## Portfolio import (PDF / images)
@@ -41,3 +42,5 @@ python scripts/train_nifty_pulse_model.py
 ```
 
 The artifact is written to `models/nifty_pulse.joblib` (override with `NIFTY_MODEL_PATH`). Restart the API so `start_poller()` loads it. Until then, predictions use the rule-based scorer with vol-scaled deadbands for hit/miss labels.
+
+On Render free tier, keep the API awake with the Cloudflare Worker in [`cloudflare/keep-api-warm`](../cloudflare/keep-api-warm) (5-minute cron during NSE hours). See [DEPLOYMENT.md](../DEPLOYMENT.md).

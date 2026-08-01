@@ -1,15 +1,14 @@
 # Ping the Render API so the free-tier service does not sleep between users.
-# Setup: GitHub repo → Settings → Secrets → Actions → SCANG_API_HEALTH_URL
+# Prefer Cloudflare Worker cron (cloudflare/keep-api-warm) for steadier timing.
+# Backup: set repo secret SCANG_API_HEALTH_URL
 #   e.g. https://scang-api-xxxx.onrender.com/api/health
-#
-# Note: GitHub schedule cron can drift by several minutes; prefer cron-job.org
-# every 10–14 min for tighter keep-alive. See DEPLOYMENT.md.
 
 name: Keep API warm
 
 on:
   schedule:
-    - cron: "*/12 * * * *"
+    # Every 5 min, weekdays, NSE window (UTC) — backup if Cloudflare is down
+    - cron: "*/5 3-10 * * 1-5"
   workflow_dispatch:
 
 jobs:
@@ -21,18 +20,18 @@ jobs:
           HEALTH_URL: ${{ secrets.SCANG_API_HEALTH_URL }}
         run: |
           if [ -z "$HEALTH_URL" ]; then
-            echo "SCANG_API_HEALTH_URL secret is not set — skip ping."
+            echo "::warning::SCANG_API_HEALTH_URL secret is not set — skip ping."
+            echo "Prefer Cloudflare Worker (cloudflare/keep-api-warm). Or set this secret as backup."
             exit 0
           fi
-          # Free-tier cold starts can exceed 90s; retry with a longer per-attempt budget.
           for i in 1 2 3; do
             if curl --fail --max-time 180 -sS "$HEALTH_URL"; then
               echo
-              echo "Pinged at $(date -u +%Y-%m-%dT%H:%M:%SZ) (attempt $i)"
+              echo "OK at $(date -u +%Y-%m-%dT%H:%M:%SZ) (attempt $i)"
               exit 0
             fi
             echo "Attempt $i failed; retrying in 15s..."
             sleep 15
           done
-          echo "All ping attempts failed."
+          echo "::error::All ping attempts failed."
           exit 1

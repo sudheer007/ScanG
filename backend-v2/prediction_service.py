@@ -647,7 +647,12 @@ def _verdict_label(outcome: Optional[str]) -> str:
 
 
 async def _persist_minute_prediction_if_due() -> None:
-    if _history_collection is None or len(_state.ticks) < 3:
+    """Upsert one Mongo row per IST minute during the open session.
+
+    Always writes a row (including FLAT / abstain) so the 1m log table has no gaps.
+    Only UP/DOWN calls are queued for hit/miss resolution.
+    """
+    if _history_collection is None or len(_state.ticks) < 1:
         return
     now = _utcnow()
     minute_start = _minute_bucket(now)
@@ -659,51 +664,110 @@ async def _persist_minute_prediction_if_due() -> None:
         latest_tick = _state.ticks[-1] if _state.ticks else None
         if latest_tick is None:
             return
-        features = _extract_features(_state.ticks)
+
+        features = _extract_features(_state.ticks) if len(_state.ticks) >= 2 else {
+            "mom_5s": 0.0,
+            "mom_10s": 0.0,
+            "mom_30s": 0.0,
+            "slope": 0.0,
+            "vol": 0.0,
+            "streak": 0.0,
+            "bank_mom_bps": 0.0,
+            "vix_mom_bps": 0.0,
+            "volume_surge": 1.0,
+            "spread_bps": _spread_bps(latest_tick),
+            "range_position": _range_position(latest_tick),
+            "from_open_bps": _from_open_bps(latest_tick),
+        }
         direction, confidence, raw_score, abstain, engine, ml_extra = _predict_from_features(
             features, 60
         )
         if abstain or direction == "FLAT":
-            _state.last_minute_prediction_key = minute_key
-            return
+            direction = "FLAT"
+            abstain = True
 
         signals = _build_signals(features, latest_tick)
-        price = latest_tick.price
-        _maybe_record_prediction(60, direction, confidence, float(price))
-        record = _state.history[-1]
-        record.trading_date = _trading_date_str(minute_start)
+        price = float(latest_tick.price)
+        trading_date = _trading_date_str(minute_start)
+
+        # Always create a dedicated log record (do not use _maybe_record_prediction —
+        # its rate-limit can skip and leave gaps / wrong history[-1] linkage).
+        pid = str(uuid.uuid4())
+        predicted_at = now
+        rec = PredictionRecord(
+            id=pid,
+            horizon_sec=60,
+            direction=direction,
+            confidence=confidence,
+            price_at=price,
+            predicted_at=predicted_at,
+            trading_date=trading_date,
+        )
+        _state.history.append(rec)
+        if direction in ("UP", "DOWN"):
+            _state.pending.append(
+                PendingOutcome(
+                    id=pid,
+                    horizon_sec=60,
+                    direction=direction,
+                    price_at=price,
+                    predicted_at=predicted_at,
+                    resolve_at=predicted_at + timedelta(seconds=60),
+                )
+            )
+        # Mark key only after we have a doc ready; cleared below if Mongo write fails.
         _state.last_minute_prediction_key = minute_key
 
-    doc = {
-        "id": record.id,
-        "symbol": SYMBOL,
-        "name": "Nifty 50",
-        "minute_key": minute_key,
-        "trading_date": _trading_date_str(minute_start),
-        "horizon_sec": 60,
-        "direction": direction,
-        "confidence": confidence,
-        "score": raw_score,
-        "predicted_price": price,
-        "price_at": price,
-        "predicted_at": record.predicted_at,
-        "resolve_at": record.predicted_at + timedelta(seconds=60),
-        "actual_price": None,
-        "price_after": None,
-        "actual_direction": None,
-        "outcome": None,
-        "verdict": "pending",
-        "status": "pending",
-        "signals": signals,
-        "features": {**features, "ewma_vol": _state.ewma_vol_bps, "session_frac": _session_fraction()},
-        "engine": engine,
-        "created_at": _utcnow(),
-    }
-    await _history_collection.update_one(
-        {"minute_key": minute_key},
-        {"$setOnInsert": doc, "$set": {"updated_at": _utcnow()}},
-        upsert=True,
-    )
+        doc = {
+            "id": pid,
+            "symbol": SYMBOL,
+            "name": "Nifty 50",
+            "minute_key": minute_key,
+            "trading_date": trading_date,
+            "horizon_sec": 60,
+            "direction": direction,
+            "confidence": confidence,
+            "score": raw_score,
+            "abstain": abstain,
+            "predicted_price": price,
+            "price_at": price,
+            "predicted_at": predicted_at,
+            "resolve_at": predicted_at + timedelta(seconds=60),
+            "actual_price": None,
+            "price_after": None,
+            "actual_direction": None,
+            "outcome": None,
+            "verdict": "pending",
+            "status": "pending",
+            "signals": signals,
+            "features": {
+                **features,
+                "ewma_vol": _state.ewma_vol_bps,
+                "session_frac": _session_fraction(now),
+            },
+            "engine": engine,
+            "deadband_bps": ml_extra.get("deadband_bps"),
+            "created_at": _utcnow(),
+        }
+
+    try:
+        await _history_collection.update_one(
+            {"minute_key": minute_key},
+            {"$setOnInsert": doc, "$set": {"updated_at": _utcnow()}},
+            upsert=True,
+        )
+        log.info(
+            "nifty 1m log upserted minute_key=%s direction=%s engine=%s",
+            minute_key,
+            direction,
+            engine,
+        )
+    except Exception as e:
+        # Allow a retry later this same minute if Mongo was briefly unavailable.
+        async with _lock:
+            if _state.last_minute_prediction_key == minute_key:
+                _state.last_minute_prediction_key = None
+        log.warning("nifty 1m log persist failed (%s): %s", minute_key, e)
 
 
 async def _poll_once() -> None:
