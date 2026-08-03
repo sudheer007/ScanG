@@ -16,8 +16,10 @@ Basket (single batched Yahoo request per poll):
                       surge and bid/ask spread signals
 
 All cross-asset/volume signals only shape *confidence*; only Nifty's own
-momentum, Bank Nifty confirmation, and VIX pressure can flip the UP/DOWN/FLAT
-call, so noise never silently biases direction.
+momentum, Bank Nifty confirmation, and VIX pressure can flip the UP/DOWN
+call, so noise never silently biases direction. When the optional ML
+meta-label abstains, predictions fall back to this rules scorer instead of
+emitting FLAT.
 """
 from __future__ import annotations
 
@@ -441,33 +443,41 @@ def _predict_from_features(
     features: Dict[str, float],
     horizon_sec: int,
 ) -> Tuple[str, float, float, bool, str, Dict[str, Any]]:
-    """Direction, confidence, score, abstain, engine name, ml extras."""
+    """Direction, confidence, score, abstain, engine name, ml extras.
+
+    Prefer the ML primary when the meta-label says trade. If the meta-model
+    abstains (or no model is loaded), fall back to the rules scorer so the
+    live pulse and 1m log always get a directional UP/DOWN call instead of
+    a day full of FLAT / NEUTRAL rows.
+    """
     ewma = _state.ewma_vol_bps
     session_frac = _session_fraction()
     enriched = nm.enrich_features(features, ewma_vol=ewma, session_frac=session_frac)
     band = nm.deadband_bps(ewma, horizon_sec)
     ml_res = nm.get_models().predict_ml(enriched, horizon_sec=horizon_sec, ewma_vol=ewma)
-    if ml_res is not None:
+    if ml_res is not None and not ml_res.abstain and ml_res.direction in ("UP", "DOWN"):
         extras = {
             "prob_up": ml_res.prob_up,
             "meta_prob": ml_res.meta_prob,
             "deadband_bps": ml_res.deadband_bps,
             "enriched": {k: enriched.get(k) for k in nm.FEATURE_NAMES},
+            "ml_abstained": False,
         }
         return (
             ml_res.direction,
             ml_res.confidence,
             ml_res.score,
-            ml_res.abstain,
+            False,
             ml_res.engine,
             extras,
         )
     direction, confidence, score = _score_direction(features)
     extras = {
-        "prob_up": None,
-        "meta_prob": None,
-        "deadband_bps": round(band, 3),
+        "prob_up": ml_res.prob_up if ml_res is not None else None,
+        "meta_prob": ml_res.meta_prob if ml_res is not None else None,
+        "deadband_bps": ml_res.deadband_bps if ml_res is not None else round(band, 3),
         "enriched": {k: enriched.get(k) for k in nm.FEATURE_NAMES},
+        "ml_abstained": bool(ml_res is not None and ml_res.abstain),
     }
     return direction, confidence, score, False, "rules", extras
 
@@ -829,9 +839,13 @@ async def _persist_minute_prediction_if_due() -> None:
         direction, confidence, raw_score, abstain, engine, ml_extra = _predict_from_features(
             features, 60
         )
-        if abstain or direction == "FLAT":
+        # Only mark FLAT when the scorer truly has no direction (e.g. empty features).
+        # ML meta-abstain already falls back to rules inside _predict_from_features.
+        if direction not in ("UP", "DOWN"):
             direction = "FLAT"
             abstain = True
+        else:
+            abstain = False
 
         signals = _build_signals(features, latest_tick)
         price = float(latest_tick.price)

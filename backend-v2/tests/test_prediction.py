@@ -180,6 +180,83 @@ def test_verdict_label_maps_prediction_outcomes():
     assert pred._verdict_label(None) == "pending"
 
 
+def test_predict_falls_back_to_rules_when_ml_abstains(monkeypatch):
+    """Meta abstain must not freeze the day as all-FLAT / NEUTRAL."""
+    import nifty_ml as nm
+
+    class _FakeModels:
+        def predict_ml(self, enriched, *, horizon_sec, ewma_vol):
+            return nm.PredictResult(
+                direction="UP",
+                confidence=61.0,
+                score=1.2,
+                abstain=True,
+                engine="ml",
+                prob_up=0.61,
+                meta_prob=0.30,
+                deadband_bps=0.8,
+            )
+
+    monkeypatch.setattr(nm, "get_models", lambda: _FakeModels())
+    feats = {
+        "mom_5s": -2.0,
+        "mom_10s": -1.5,
+        "slope": -1.0,
+        "vol": 0.1,
+        "streak": -4,
+        "bank_mom_bps": -1.0,
+        "vix_mom_bps": 0.5,
+        "volume_surge": 1.0,
+        "spread_bps": 0.0,
+        "range_position": 0.5,
+        "from_open_bps": -5.0,
+    }
+    direction, confidence, score, abstain, engine, extras = pred._predict_from_features(
+        feats, 60
+    )
+    assert direction in ("UP", "DOWN")
+    assert abstain is False
+    assert engine == "rules"
+    assert extras.get("ml_abstained") is True
+    assert extras.get("meta_prob") == 0.30
+    assert score < 0  # rules follow bearish momentum
+    assert direction == "DOWN"
+
+
+def test_predict_uses_ml_when_meta_allows(monkeypatch):
+    import nifty_ml as nm
+
+    class _FakeModels:
+        def predict_ml(self, enriched, *, horizon_sec, ewma_vol):
+            return nm.PredictResult(
+                direction="UP",
+                confidence=72.0,
+                score=2.0,
+                abstain=False,
+                engine="ml",
+                prob_up=0.72,
+                meta_prob=0.66,
+                deadband_bps=0.8,
+            )
+
+    monkeypatch.setattr(nm, "get_models", lambda: _FakeModels())
+    feats = {
+        "mom_5s": -2.0,
+        "mom_10s": -1.5,
+        "slope": -1.0,
+        "vol": 0.1,
+        "streak": -4,
+    }
+    direction, confidence, score, abstain, engine, extras = pred._predict_from_features(
+        feats, 60
+    )
+    assert direction == "UP"
+    assert confidence == 72.0
+    assert abstain is False
+    assert engine == "ml"
+    assert extras.get("ml_abstained") is False
+
+
 def test_trading_date_uses_ist_boundary():
     late_utc = datetime(2026, 7, 16, 20, 0, tzinfo=timezone.utc)
     assert pred._trading_date_str(late_utc) == "2026-07-17"

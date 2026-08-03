@@ -30,3 +30,8 @@ def test_enrich_vol_normalizes_momentum():
 def test_update_ewma_vol_positive():
     v = nm.update_ewma_vol(1.0, 5.0)
     assert v > 0
+
+
+def test_outcome_predicted_flat_is_flat():
+    assert nm.outcome_for_prediction("FLAT", "UP") == "flat"
+    assert nm.outcome_for_prediction("FLAT", "DOWN") == "flat"

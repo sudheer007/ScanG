@@ -20,7 +20,9 @@ log = logging.getLogger(__name__)
 # Base deadband (bps); scaled up with EWMA vol and horizon.
 MIN_DEADBAND_BPS = 0.5
 DEADBAND_VOL_MULT = 0.35
-META_ABSTAIN_THRESHOLD = 0.52
+# Meta P(hit) below this → abstain from the ML primary and let the caller
+# fall back to the rules scorer (see prediction_service._predict_from_features).
+META_ABSTAIN_THRESHOLD = 0.45
 
 FEATURE_NAMES: List[str] = [
     "mom_5s_n",
@@ -176,9 +178,9 @@ class NiftyPulseModels:
             if self.meta is not None:
                 meta_prob = float(self.meta.predict_proba(x)[0][1])
                 if meta_prob < META_ABSTAIN_THRESHOLD:
+                    # Keep primary UP/DOWN for diagnostics; caller falls back to rules.
                     abstain = True
-                    direction = "FLAT"
-                    confidence = min(confidence, (1.0 - meta_prob) * 100.0)
+                    confidence = min(confidence, max(meta_prob, 0.0) * 100.0)
 
             return PredictResult(
                 direction=direction,
