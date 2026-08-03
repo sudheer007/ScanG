@@ -178,6 +178,62 @@ async def configure_persistence(collection: Any) -> None:
     await _history_collection.create_index([("minute_key", ASCENDING)], unique=True)
     await _history_collection.create_index([("trading_date", ASCENDING), ("predicted_at", ASCENDING)])
     await _history_collection.create_index([("resolved_at", ASCENDING)])
+    await _history_collection.create_index([("status", ASCENDING), ("resolve_at", ASCENDING)])
+    # Reload overdue/pending 1m rows into memory so they still resolve after restart.
+    await _rehydrate_pending_from_mongo()
+
+
+async def _rehydrate_pending_from_mongo() -> None:
+    """Queue unresolved Mongo 1m logs that still need an actual price."""
+    if _history_collection is None:
+        return
+    now = _utcnow()
+    try:
+        docs = await _history_collection.find(
+            {
+                "horizon_sec": 60,
+                "status": "pending",
+                "resolve_at": {"$lte": now + timedelta(minutes=5)},
+            },
+            {"_id": 0, "id": 1, "direction": 1, "price_at": 1, "predicted_price": 1,
+             "predicted_at": 1, "resolve_at": 1, "horizon_sec": 1},
+        ).sort("resolve_at", ASCENDING).limit(200).to_list(length=200)
+    except Exception as e:
+        log.warning("nifty pending rehydrate failed: %s", e)
+        return
+
+    async with _lock:
+        existing = {p.id for p in _state.pending}
+        for d in docs:
+            pid = d.get("id")
+            if not pid or pid in existing:
+                continue
+            price = _f(d.get("price_at") if d.get("price_at") is not None else d.get("predicted_price"))
+            if price is None:
+                continue
+            predicted_at = d.get("predicted_at")
+            resolve_at = d.get("resolve_at")
+            if not isinstance(predicted_at, datetime) or not isinstance(resolve_at, datetime):
+                continue
+            if predicted_at.tzinfo is None:
+                predicted_at = predicted_at.replace(tzinfo=timezone.utc)
+            if resolve_at.tzinfo is None:
+                resolve_at = resolve_at.replace(tzinfo=timezone.utc)
+            direction = d.get("direction") or "FLAT"
+            _state.pending.append(
+                PendingOutcome(
+                    id=pid,
+                    horizon_sec=int(d.get("horizon_sec") or 60),
+                    direction=direction,
+                    price_at=float(price),
+                    predicted_at=predicted_at,
+                    resolve_at=resolve_at,
+                )
+            )
+            existing.add(pid)
+        if docs:
+            log.info("Rehydrated %s pending nifty 1m log(s) from Mongo", len(docs))
+
 
 
 def _nse_session_status(now: Optional[datetime] = None) -> str:
@@ -552,6 +608,21 @@ async def _append_snapshot(quotes: Dict[str, Dict[str, Any]]) -> None:
         _state.poll_count += 1
 
 
+def _resolve_one_outcome(
+    *,
+    direction: str,
+    price_at: float,
+    price_after: float,
+    horizon_sec: int,
+) -> Tuple[str, str, float]:
+    """Return (actual_direction, outcome, price_after)."""
+    band = nm.deadband_bps(_state.ewma_vol_bps, horizon_sec)
+    move_bps = nm.move_bps(price_at, price_after)
+    actual = nm.actual_direction_from_move(move_bps, band)
+    outcome = nm.outcome_for_prediction(direction, actual)
+    return actual, outcome, price_after
+
+
 async def _resolve_pending() -> None:
     now = _utcnow()
     resolved_records: List[PredictionRecord] = []
@@ -562,14 +633,18 @@ async def _resolve_pending() -> None:
                 still_pending.append(p)
                 continue
             price_after = _price_at_or_before(_state.ticks, now)
+            if price_after is None and _state.ticks:
+                # Fall back to latest tick if buffer advanced past resolve time.
+                price_after = _state.ticks[-1].price
             if price_after is None:
                 still_pending.append(p)
                 continue
-            move = price_after - p.price_at
-            band = nm.deadband_bps(_state.ewma_vol_bps, p.horizon_sec)
-            move_bps = nm.move_bps(p.price_at, price_after)
-            actual = nm.actual_direction_from_move(move_bps, band)
-            outcome = nm.outcome_for_prediction(p.direction, actual)
+            actual, outcome, price_after = _resolve_one_outcome(
+                direction=p.direction,
+                price_at=p.price_at,
+                price_after=price_after,
+                horizon_sec=p.horizon_sec,
+            )
 
             # Update matching history record
             for rec in reversed(_state.history):
@@ -580,6 +655,22 @@ async def _resolve_pending() -> None:
                     rec.actual_direction = actual
                     resolved_records.append(rec)
                     break
+            else:
+                # Pending came from Mongo rehydrate — still persist outcome below.
+                resolved_records.append(
+                    PredictionRecord(
+                        id=p.id,
+                        horizon_sec=p.horizon_sec,
+                        direction=p.direction,
+                        confidence=0.0,
+                        price_at=p.price_at,
+                        predicted_at=p.predicted_at,
+                        outcome=outcome,
+                        price_after=price_after,
+                        resolved_at=now,
+                        actual_direction=actual,
+                    )
+                )
         _state.pending = still_pending
 
     if _history_collection is not None:
@@ -599,6 +690,62 @@ async def _resolve_pending() -> None:
                     }
                 },
             )
+
+
+async def _resolve_stale_mongo_logs() -> None:
+    """Backfill pending Mongo rows whose resolve_at has passed (survives restarts)."""
+    if _history_collection is None or len(_state.ticks) < 1:
+        return
+    now = _utcnow()
+    try:
+        docs = await _history_collection.find(
+            {
+                "status": "pending",
+                "horizon_sec": 60,
+                "resolve_at": {"$lte": now},
+            },
+            {"_id": 0, "id": 1, "direction": 1, "price_at": 1, "predicted_price": 1,
+             "horizon_sec": 1},
+        ).limit(80).to_list(length=80)
+    except Exception as e:
+        log.warning("nifty stale mongo scan failed: %s", e)
+        return
+
+    if not docs:
+        return
+
+    price_after = _state.ticks[-1].price
+    for d in docs:
+        pid = d.get("id")
+        price_at = _f(d.get("price_at") if d.get("price_at") is not None else d.get("predicted_price"))
+        if not pid or price_at is None:
+            continue
+        direction = d.get("direction") or "FLAT"
+        horizon = int(d.get("horizon_sec") or 60)
+        actual, outcome, pa = _resolve_one_outcome(
+            direction=direction,
+            price_at=float(price_at),
+            price_after=float(price_after),
+            horizon_sec=horizon,
+        )
+        try:
+            await _history_collection.update_one(
+                {"id": pid, "status": "pending"},
+                {
+                    "$set": {
+                        "outcome": outcome,
+                        "actual_price": pa,
+                        "price_after": pa,
+                        "resolved_at": now,
+                        "actual_direction": actual,
+                        "status": "resolved",
+                        "verdict": _verdict_label(outcome),
+                        "updated_at": now,
+                    }
+                },
+            )
+        except Exception as e:
+            log.warning("nifty stale resolve failed id=%s: %s", pid, e)
 
 
 def _maybe_record_prediction(
@@ -650,7 +797,7 @@ async def _persist_minute_prediction_if_due() -> None:
     """Upsert one Mongo row per IST minute during the open session.
 
     Always writes a row (including FLAT / abstain) so the 1m log table has no gaps.
-    Only UP/DOWN calls are queued for hit/miss resolution.
+    Every row is queued for actual-price resolution after 60s (FLAT → neutral verdict).
     """
     if _history_collection is None or len(_state.ticks) < 1:
         return
@@ -704,17 +851,17 @@ async def _persist_minute_prediction_if_due() -> None:
             trading_date=trading_date,
         )
         _state.history.append(rec)
-        if direction in ("UP", "DOWN"):
-            _state.pending.append(
-                PendingOutcome(
-                    id=pid,
-                    horizon_sec=60,
-                    direction=direction,
-                    price_at=price,
-                    predicted_at=predicted_at,
-                    resolve_at=predicted_at + timedelta(seconds=60),
-                )
+        # Always queue for resolution (including FLAT) so actual_price is filled.
+        _state.pending.append(
+            PendingOutcome(
+                id=pid,
+                horizon_sec=60,
+                direction=direction,
+                price_at=price,
+                predicted_at=predicted_at,
+                resolve_at=predicted_at + timedelta(seconds=60),
             )
+        )
         # Mark key only after we have a doc ready; cleared below if Mongo write fails.
         _state.last_minute_prediction_key = minute_key
 
@@ -784,6 +931,7 @@ async def _poll_once() -> None:
     if _nse_session_status() == "open":
         await _persist_minute_prediction_if_due()
     await _resolve_pending()
+    await _resolve_stale_mongo_logs()
 
 
 async def _poll_loop() -> None:
@@ -800,6 +948,9 @@ async def _poll_loop() -> None:
                 await _poll_once()
             else:
                 sleep_sec = POLL_INTERVAL_CLOSED_SEC
+                # Still resolve overdue Mongo rows after the bell / on wake.
+                await _resolve_pending()
+                await _resolve_stale_mongo_logs()
         except asyncio.CancelledError:
             raise
         except Exception as e:
