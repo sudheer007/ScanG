@@ -19,6 +19,8 @@ import NewsList from '@/src/components/NewsList';
 import SectorHeatmap, { HeatmapColorMode } from '@/src/components/SectorHeatmap';
 import SectorDetailSheet from '@/src/components/SectorDetailSheet';
 import { EmptyState, ErrorState, LoadingState } from '@/src/components/States';
+import ProActivatedToast from '@/src/components/ProActivatedToast';
+import { useProActivatedToast } from '@/src/hooks/useProActivatedToast';
 
 type Tab = 'overview' | 'movers' | 'sectors' | 'news' | 'calendar';
 
@@ -29,6 +31,7 @@ const OVERVIEW_REORDER_MS = 60_000;
 
 export default function MarketsScreen() {
   const router = useRouter();
+  const { visible: proToastVisible, dismiss: dismissProToast } = useProActivatedToast();
   const [market, setMarket] = useState<Market | null>(() => marketPref.peek());
   const [tab, setTab] = useState<Tab>('overview');
 
@@ -329,6 +332,8 @@ export default function MarketsScreen() {
         currency={sectorCurrency}
         onClose={() => setSectorSheetOpen(false)}
       />
+
+      <ProActivatedToast visible={proToastVisible} onDismiss={dismissProToast} />
     </SafeAreaView>
   );
 }

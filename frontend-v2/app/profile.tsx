@@ -364,7 +364,7 @@ export default function ProfileScreen() {
                   color={isPremium ? PREMIUM_GOLD : BASIC_SLATE}
                 />
                 <Text style={[styles.planTagText, isPremium ? styles.planTagTextPremium : styles.planTagTextBasic]}>
-                  {isPremium ? 'Premium' : 'Basic'}
+                  {isPremium ? 'Pro' : 'Basic'}
                 </Text>
               </View>
             )}
