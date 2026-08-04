@@ -25,6 +25,7 @@ import {
   ApiError,
   type PaymentPlan,
 } from '@/src/api';
+import { markProJustActivated } from '@/src/proActivatedToast';
 
 const ACCENT = authTheme.colors.primary;
 const ACCENT_DIM = 'rgba(26, 130, 255, 0.14)';
@@ -131,6 +132,7 @@ export default function SubscribeScreen() {
                 razorpay_signature: data.razorpay_signature,
               });
               await refresh();
+              markProJustActivated();
               router.replace({
                 pathname: '/payment-result',
                 params: {

@@ -1,23 +1,30 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
 
 import { useEntitlement } from '@/src/hooks/useEntitlement';
-
-/** Resets on full page reload / cold app start — once per open, not forever. */
-let shownThisSession = false;
+import { consumeProJustActivated } from '@/src/proActivatedToast';
 
 /**
- * Shows the "Pro activated" toast once per website/app open when the user is premium
- * and lands on the home (Markets) screen.
+ * Shows "Pro activated" only once after a successful payment,
+ * when the user lands on / focuses the home (Markets) screen.
  */
 export function useProActivatedToast() {
   const { isPremium, hydrated } = useEntitlement();
   const [visible, setVisible] = useState(false);
 
-  useEffect(() => {
-    if (!hydrated || !isPremium || shownThisSession) return;
-    shownThisSession = true;
-    setVisible(true);
-  }, [hydrated, isPremium]);
+  useFocusEffect(
+    useCallback(() => {
+      if (!hydrated || !isPremium) return;
+      let cancelled = false;
+      (async () => {
+        const pending = await consumeProJustActivated();
+        if (!cancelled && pending) setVisible(true);
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, [hydrated, isPremium]),
+  );
 
   const dismiss = useCallback(() => setVisible(false), []);
 
