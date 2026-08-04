@@ -42,7 +42,7 @@ def build_plan_catalog() -> Dict[str, Dict[str, Any]]:
             "id": "premium_monthly",
             "name": "Premium Monthly",
             "description": "Full ScanG Premium, billed every month",
-            "amount": 29900,  # ₹299.00
+            "amount": 1000,  # ₹10.00
             "currency": "INR",
             "interval": "monthly",
             "interval_count": 1,
@@ -54,7 +54,7 @@ def build_plan_catalog() -> Dict[str, Dict[str, Any]]:
             "id": "premium_yearly",
             "name": "Premium Yearly",
             "description": "Full ScanG Premium, billed once a year",
-            "amount": 249900,  # ₹2499.00
+            "amount": 2000,  # ₹20.00
             "currency": "INR",
             "interval": "yearly",
             "interval_count": 1,

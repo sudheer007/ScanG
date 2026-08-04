@@ -1,9 +1,8 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { Text, StyleSheet } from 'react-native';
 
 import AuthLayout from '@/src/components/auth/AuthLayout';
 import GoogleSignInButton from '@/src/components/auth/GoogleSignInButton';
-import BackendStatus from '@/src/components/auth/BackendStatus';
 import { useAuth } from '@/src/hooks/useAuth';
 import { authTheme } from '@/src/auth/authTheme';
 
@@ -29,9 +28,6 @@ export default function LoginScreen() {
     <AuthLayout title="Welcome" subtitle="Sign in with Google to continue">
       <GoogleSignInButton onPress={onGoogle} loading={busy} />
       {error ? <Text style={styles.error}>{error}</Text> : null}
-      <View style={styles.status}>
-        <BackendStatus />
-      </View>
     </AuthLayout>
   );
 }
@@ -41,8 +37,5 @@ const styles = StyleSheet.create({
     color: authTheme.colors.error,
     fontSize: 13,
     textAlign: 'center',
-  },
-  status: {
-    marginTop: 8,
   },
 });

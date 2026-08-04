@@ -189,7 +189,7 @@ class TestPaymentRoutes:
             return_value={
                 "id": "premium_monthly",
                 "name": "Premium Monthly",
-                "amount": 29900,
+                "amount": 1000,
                 "currency": "INR",
                 "interval": "monthly",
                 "total_count": 120,
